@@ -112,13 +112,16 @@ class AutoUpdater {
     }
 
     this.isUpdating = true;
-    const tempAsarPath = path.join(os.tmpdir(), `saqr-update-${Date.now()}.asar`);
+    const tempUpdatePath = path.join(os.tmpdir(), `saqr-update-${Date.now()}.bin`);
 
     try {
-      await this._downloadFile(asarUrl, tempAsarPath, progressCallback);
+      await this._downloadFile(asarUrl, tempUpdatePath, progressCallback);
 
-      // Verify file size
-      const stats = fs.statSync(tempAsarPath);
+      // Verify file size with asar disabled
+      process.noAsar = true;
+      const stats = fs.statSync(tempUpdatePath);
+      process.noAsar = false;
+
       if (stats.size < 100 * 1024) { // Less than 100KB is likely an error page
         throw new Error('حزمة التحديث المحملة تالفة أو غير مكتملة');
       }
@@ -143,13 +146,13 @@ chcp 65001 >nul
 echo [Saqr Edge Agent] Updating application to latest version...
 timeout /t 2 /nobreak >nul
 
-copy /y "${tempAsarPath}" "${liveAsarPath}" >nul
+copy /y "${tempUpdatePath}" "${liveAsarPath}" >nul
 if errorlevel 1 (
   timeout /t 2 /nobreak >nul
-  copy /y "${tempAsarPath}" "${liveAsarPath}" >nul
+  copy /y "${tempUpdatePath}" "${liveAsarPath}" >nul
 )
 
-del "${tempAsarPath}" >nul 2>&1
+del "${tempUpdatePath}" >nul 2>&1
 start "" "${exePath}"
 (goto) 2>nul & del "%~f0"
 `;
@@ -174,8 +177,8 @@ start "" "${exePath}"
         const shPath = path.join(os.tmpdir(), `saqr_apply_update_${Date.now()}.sh`);
         const shContent = `#!/bin/sh
 sleep 2
-cp -f "${tempAsarPath}" "${liveAsarPath}"
-rm -f "${tempAsarPath}"
+cp -f "${tempUpdatePath}" "${liveAsarPath}"
+rm -f "${tempUpdatePath}"
 "${exePath}" &
 rm -f "$0"
 `;
@@ -196,7 +199,13 @@ rm -f "$0"
 
   _downloadFile(url, destPath, progressCallback) {
     return new Promise((resolve, reject) => {
-      const file = fs.createWriteStream(destPath);
+      process.noAsar = true;
+      let file;
+      try {
+        file = fs.createWriteStream(destPath);
+      } finally {
+        process.noAsar = false;
+      }
       const client = url.startsWith('https') ? https : http;
 
       const handleResponse = (res) => {
@@ -208,12 +217,20 @@ rm -f "$0"
             redirectUrl = `${urlObj.origin}${redirectUrl}`;
           }
           const nextClient = redirectUrl.startsWith('https') ? https : http;
-          return nextClient.get(redirectUrl, handleResponse).on('error', reject);
+          return nextClient.get(redirectUrl, handleResponse).on('error', (err) => {
+            file.close();
+            process.noAsar = true;
+            try { fs.unlinkSync(destPath); } catch {}
+            process.noAsar = false;
+            reject(err);
+          });
         }
 
         if (res.statusCode !== 200) {
           file.close();
+          process.noAsar = true;
           try { fs.unlinkSync(destPath); } catch {}
+          process.noAsar = false;
           return reject(new Error(`فشل تحميل التحديث (HTTP ${res.statusCode})`));
         }
 
@@ -239,12 +256,22 @@ rm -f "$0"
         file.on('finish', () => {
           file.close(() => resolve());
         });
+
+        file.on('error', (err) => {
+          file.close();
+          process.noAsar = true;
+          try { fs.unlinkSync(destPath); } catch {}
+          process.noAsar = false;
+          reject(err);
+        });
       };
 
       const req = client.get(url, handleResponse);
       req.on('error', err => {
         file.close();
+        process.noAsar = true;
         try { fs.unlinkSync(destPath); } catch {}
+        process.noAsar = false;
         reject(err);
       });
     });
