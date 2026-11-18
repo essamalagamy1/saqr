@@ -1,0 +1,61 @@
+name: Deploy Saqr Multi-Tenant Servers
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # تفعيل إمكانية الضغط على زر Run workflow يدوياً من GitHub
+
+jobs:
+  load-servers:
+    name: 🔍 فحص قائمة سيرفرات المطاعم المستهدفة
+    runs-on: ubuntu-latest
+    outputs:
+      servers: ${{ steps.set-servers.outputs.servers }}
+    steps:
+      - name: Parse Servers Configuration
+        id: set-servers
+        run: |
+          # 1. إذا كان متغير SERVERS_JSON معرّفاً في GitHub Variables
+          if [ -n '${{ vars.SERVERS_JSON }}' ]; then
+            echo 'servers=${{ vars.SERVERS_JSON }}' >> $GITHUB_OUTPUT
+          # 2. بديل: إذا كان معرفاً كسيرفر فردي في Secrets
+          elif [ -n '${{ secrets.SERVER_HOST }}' ]; then
+            USER_NAME="${{ secrets.SERVER_USER }}"
+            USER_NAME="${USER_NAME:-root}"
+            PORT_NUM="${{ secrets.SERVER_PORT }}"
+            PORT_NUM="${PORT_NUM:-22}"
+            echo "servers=[{\"name\": \"الخادم الرئيسي\", \"host\": \"${{ secrets.SERVER_HOST }}\", \"user\": \"$USER_NAME\", \"port\": $PORT_NUM}]" >> $GITHUB_OUTPUT
+          else
+            echo "❌ خطأ: يرجى إضافة متغير SERVERS_JSON أو SERVER_HOST في إعدادات مستودع GitHub!"
+            exit 1
+          fi
+
+  deploy:
+    name: 🚀 تحديث ${{ matrix.server.name }} (${{ matrix.server.host }})
+    needs: load-servers
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # لضمان عدم توقف تحديث بقية المطاعم إذا كان سيرفر أحدها مغلقاً للصيانة
+      matrix:
+        server: ${{ fromJson(needs.load-servers.outputs.servers) }}
+    steps:
+      - name: تنفيذ سكريبت التحديث عبر SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ matrix.server.host }}
+          username: ${{ matrix.server.user || 'root' }}
+          port: ${{ matrix.server.port || 22 }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script_stop: true
+          command_timeout: 15m
+          script: |
+            TARGET_PATH="${{ matrix.server.path || '/opt/saqr' }}"
+            echo "🚀 بدء التحديث في المسار: $TARGET_PATH على سيرفر: ${{ matrix.server.name }}"
+            if [ ! -d "$TARGET_PATH" ]; then
+              echo "❌ خطأ: مسار المشروع $TARGET_PATH غير موجود على هذا السيرفر!"
+              exit 1
+            fi
+            export SAQR_DIR="$TARGET_PATH"
+            cd "$TARGET_PATH"
+            bash scripts/deploy.sh

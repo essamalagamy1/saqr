@@ -72,7 +72,12 @@ async function loadCameras() {
     return;
   }
 
-  list.innerHTML = cameras.map(cam => `
+  list.innerHTML = cameras.map(cam => {
+    const hasCreds = /rtsp:\/\/[^@:]+:[^@]+@/i.test(cam.rtspUrl || '');
+    const isLocalCam = (cam.rtspUrl || '').includes('192.168.') || (cam.rtspUrl || '').includes('10.');
+    const needsPassword = !hasCreds && isLocalCam;
+
+    return `
     <div class="camera-card ${cam.enabled ? '' : 'disabled'}">
       <div class="camera-status-indicator ${cam.enabled ? 'active' : 'inactive'}">
         <span class="status-ping"></span>
@@ -83,10 +88,23 @@ async function loadCameras() {
           <span class="camera-chip ${cam.enabled ? 'chip-active' : 'chip-inactive'}">
             ${cam.enabled ? 'نشطة • معالجة YOLOX' : 'معطلة مؤقتاً'}
           </span>
+          ${needsPassword ? `
+            <span class="camera-chip chip-warning">
+              تتطلب كود التحقق / كلمة المرور
+            </span>` : ''}
         </div>
-        <div class="camera-url">${escapeHtml(cam.rtspUrl || 'بدون مسار بث')}</div>
+        <div class="camera-url">${escapeHtml(maskPasswordInUrl(cam.rtspUrl) || 'بدون مسار بث')}</div>
       </div>
       <div class="camera-actions">
+        <!-- Edit Credentials / Password Button -->
+        <button class="btn-icon ${needsPassword ? 'warning-glow' : ''}" onclick="openEditPasswordModal('${cam.id}')" title="إضافة / تعديل كلمة المرور أو كود التحقق">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="7.5" cy="15.5" r="5.5"/>
+            <path d="m21 2-9.6 9.6"/>
+            <path d="m15.5 7.5 3 3L22 7l-3-3"/>
+          </svg>
+        </button>
+
         <label class="switch-toggle" title="${cam.enabled ? 'إيقاف معالجة الكاميرا' : 'تفعيل معالجة الكاميرا'}">
           <input type="checkbox" ${cam.enabled ? 'checked' : ''} onchange="toggleCamera('${cam.id}')">
           <span class="switch-slider"></span>
@@ -100,13 +118,125 @@ async function loadCameras() {
         </button>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
+}
+
+function maskPasswordInUrl(url) {
+  if (!url) return '';
+  return url.replace(/^(rtsp:\/\/[^@:]+:)([^@]+)(@)/i, '$1••••$3');
+}
+
+// ===== Edit Password / Credentials Modal =====
+let currentEditCam = null;
+
+async function openEditPasswordModal(id) {
+  const cameras = await rased.cameras.list();
+  const cam = cameras.find(c => c.id === id);
+  if (!cam) return;
+
+  currentEditCam = cam;
+  document.getElementById('editCamId').value = cam.id;
+  document.getElementById('editCamName').value = cam.name;
+  document.getElementById('editTestResult').style.display = 'none';
+
+  // Parse RTSP URL: rtsp://[user:pass@]host[:port][/path]
+  let url = (cam.rtspUrl || '').trim();
+  let user = 'admin';
+  let pass = '';
+  let host = url;
+
+  if (url.startsWith('rtsp://')) {
+    url = url.substring(7);
+  }
+
+  if (url.includes('@')) {
+    const parts = url.split('@');
+    const auth = parts[0];
+    host = parts[1];
+    if (auth.includes(':')) {
+      const authParts = auth.split(':');
+      user = decodeURIComponent(authParts[0]);
+      pass = decodeURIComponent(authParts[1]);
+    } else {
+      user = decodeURIComponent(auth);
+    }
+  }
+
+  document.getElementById('editCamUser').value = user || 'admin';
+  document.getElementById('editCamPass').value = pass || '';
+  document.getElementById('editCamHost').value = host || '';
+  document.getElementById('editPasswordModal').style.display = 'flex';
+}
+
+function closeEditPasswordModal() {
+  document.getElementById('editPasswordModal').style.display = 'none';
+  currentEditCam = null;
+}
+
+function buildRtspFromInputs() {
+  let host = document.getElementById('editCamHost').value.trim();
+  const user = document.getElementById('editCamUser').value.trim();
+  const pass = document.getElementById('editCamPass').value.trim();
+
+  if (!host) return '';
+  if (host.startsWith('rtsp://')) host = host.substring(7);
+
+  // If user only entered IP or IP:port without a stream path, append default EZVIZ/Hikvision path
+  if (!host.includes('/')) {
+    if (!host.includes(':')) host += ':554';
+    host += '/ch1/main';
+  }
+
+  if (pass) {
+    return `rtsp://${encodeURIComponent(user || 'admin')}:${encodeURIComponent(pass)}@${host}`;
+  }
+  return `rtsp://${host}`;
+}
+
+async function testEditPasswordConnection() {
+  const rtspUrl = buildRtspFromInputs();
+  if (!rtspUrl) { alert('يرجى التأكد من كتابة عنوان الكاميرا'); return; }
+
+  const resultDiv = document.getElementById('editTestResult');
+  resultDiv.style.display = 'block';
+  resultDiv.className = 'test-result testing';
+  resultDiv.textContent = 'جاري اختبار الاتصال بالبث وسحب إطار حي...';
+
+  const result = await rased.cameras.test(rtspUrl);
+  if (result.success) {
+    resultDiv.className = 'test-result success';
+    resultDiv.textContent = `تم الاتصال بنجاح! كلمة السر ومسار البث صالحين (الاستجابة: ${result.data.latencyMs}ms)`;
+    if (result.data.workingUrl) {
+      const cleanHost = result.data.workingUrl.replace(/^rtsp[s]?:\/\/[^@]+@/i, '').replace(/^rtsp[s]?:\/\//i, '');
+      document.getElementById('editCamHost').value = cleanHost;
+    }
+  } else {
+    resultDiv.className = 'test-result error';
+    resultDiv.innerHTML = escapeHtml(result.error || 'فشل الاتصال').replace(/\n/g, '<br>');
+  }
+}
+
+async function saveEditPassword() {
+  const id = document.getElementById('editCamId').value;
+  const rtspUrl = buildRtspFromInputs();
+
+  if (!rtspUrl) {
+    alert('يرجى إدخال عنوان الكاميرا بشكل سليم');
+    return;
+  }
+
+  await rased.cameras.update(id, { rtspUrl });
+  closeEditPasswordModal();
+  loadCameras();
 }
 
 function showAddCameraModal() {
   document.getElementById('addCameraModal').style.display = 'flex';
   document.getElementById('cameraName').value = '';
   document.getElementById('cameraRtsp').value = '';
+  document.getElementById('cameraAddUser').value = 'admin';
+  document.getElementById('cameraAddPass').value = '';
   document.getElementById('cameraBranch').value = '';
   document.getElementById('cameraTestResult').style.display = 'none';
 }
@@ -117,11 +247,21 @@ function closeAddCameraModal() {
 
 async function addCamera() {
   const name = document.getElementById('cameraName').value.trim();
-  const rtspUrl = document.getElementById('cameraRtsp').value.trim();
+  let rtspUrl = document.getElementById('cameraRtsp').value.trim();
+  const addUser = document.getElementById('cameraAddUser').value.trim();
+  const addPass = document.getElementById('cameraAddPass').value.trim();
   const branchId = document.getElementById('cameraBranch').value.trim();
 
   if (!name) { alert('يرجى تحديد اسم للكاميرا'); return; }
   if (!rtspUrl) { alert('يرجى إدخال عنوان RTSP للبث'); return; }
+
+  // Assemble credentials if user entered them separately
+  if (addPass && !rtspUrl.includes('@')) {
+    let host = rtspUrl.startsWith('rtsp://') ? rtspUrl.substring(7) : rtspUrl;
+    rtspUrl = `rtsp://${encodeURIComponent(addUser || 'admin')}:${encodeURIComponent(addPass)}@${host}`;
+  } else if (!rtspUrl.startsWith('rtsp://') && !rtspUrl.startsWith('http://')) {
+    rtspUrl = 'rtsp://' + rtspUrl;
+  }
 
   await rased.cameras.add({ name, rtspUrl, branchId, enabled: true });
   closeAddCameraModal();

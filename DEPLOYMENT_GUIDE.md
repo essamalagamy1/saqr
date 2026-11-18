@@ -13,6 +13,7 @@
 6. [ربط تطبيق الويندوز (Saqr Edge Agent) في موقع العميل](#6-ربط-تطبيق-الويندوز-saqr-edge-agent)
 7. [جدول كافة المنافذ والمتغيرات وكيفية تغييرها](#7-جدول-المنافذ-والمتغيرات-وكيفية-تغييرها)
 8. [أوامر الصيانة والنسخ الاحتياطي السريع](#8-أوامر-الصيانة-والنسخ-الاحتياطي)
+9. [التحديث التلقائي لكافة السيرفرات (CI/CD Multi-Server GitHub Action)](#9-التحديث-التلقائي-لكافة-السيرفرات-cicd-github-actions)
 
 ---
 
@@ -80,13 +81,26 @@ sudo sh get-docker.sh
 sudo usermod -aG docker $USER
 ```
 
-### الخطوة 2: رفع مجلد المشروع إلى السيرفر
-يمكنك رفع المجلد إلى المسار `/opt/saqr`:
+### الخطوة 2: استنساخ المشروع عبر Git (SSH)
+يتم تنزيل الكود دائماً على أي سيرفر عبر رابط المستودع:
+`git@github.com:essamalagamy1/saqr.git`
+
+قم بتجهيز مفتاح SSH على السيرفر لربطه بـ GitHub:
 ```bash
-sudo mkdir -p /opt/saqr
+# 1. توليد مفتاح SSH جديد
+ssh-keygen -t ed25519 -C "saqr-vps" -N "" -f ~/.ssh/id_ed25519
+
+# 2. عرض المفتاح العام ونسخه
+cat ~/.ssh/id_ed25519.pub
+```
+* انسخ المفتاح الظاهر واذهب إلى مستودع GitHub:
+  `Settings` ➔ `Deploy Keys` ➔ `Add deploy key` ➔ الصق المفتاح وضع علامة على `Allow write access` إذا رغبت.
+
+الآن قم باستنساخ الكود مباشرة إلى المسار المعتمد `/opt/saqr`:
+```bash
+sudo git clone git@github.com:essamalagamy1/saqr.git /opt/saqr
 sudo chown -R $USER:$USER /opt/saqr
 cd /opt/saqr
-# انسخ ملفات المشروع هنا (عبر git clone أو rsync أو scp)
 ```
 
 ### الخطوة 3: إعداد ملف المتغيرات البيئية للمشروع (`docker-compose.yml`)
@@ -326,6 +340,81 @@ docker compose logs -f postgres
 # سجلات الوسائط والبث المباشر
 docker compose logs -f mediamtx
 ```
+
+---
+
+## 9. التحديث التلقائي لكافة السيرفرات (CI/CD GitHub Actions)
+
+تم تجهيز ملف GitHub Action كامل في المسار:
+`.github/workflows/deploy.yml`
+
+وسكريبت التحديث المحلي في:
+`scripts/deploy.sh`
+
+### كيف تعمل ميزة التحديث المتعدد (Multi-Tenant Auto-Deploy)؟
+عند عمل أي `git push origin main`:
+1. يقوم GitHub Action تلقائياً بقراءة قائمة سيرفرات المطاعم المختلفة المسجلة لديك.
+2. يتصل بكل سيرفر بالتوازي (In Parallel) عبر SSH.
+3. ينفذ سكريبت `deploy.sh` على كل سيرفر لسحب أحدث كود، وتحديث جداول قاعدة البيانات، وإعادة بناء الـ API والـ Web تلقائياً.
+4. خاصية `fail-fast: false` تضمن أنه لو كان سيرفر أحد المطاعم مغلقاً أو تحت الصيانة، **لن يتعطل تحديث بقية السيرفرات إطلاقاً**.
+
+---
+
+### خطوات الإعداد والتفعيل على GitHub:
+
+#### 1. إضافة مفتاح الـ SSH الخاص (SSH Private Key):
+* ولد مفتاح SSH مخصص للنشر (أو استخدم المفتاح المعتمد للسيرفرات):
+  ```bash
+  ssh-keygen -t ed25519 -C "github-actions-deploy" -N "" -f ~/.ssh/github_deploy
+  ```
+* انسخ المفتاح العام `github_deploy.pub` وضعه في ملف `~/.ssh/authorized_keys` على **كل سيرفر مطعم**.
+* انسخ المفتاح الخاص `github_deploy` وضعه في GitHub:
+  * اذهب لمستودعك على GitHub: `Settings` ➔ `Secrets and variables` ➔ `Actions` ➔ `New repository secret`.
+  * الاسم: `SSH_PRIVATE_KEY`
+  * القيمة: الصق محتوى المفتاح الخاص كاملاً.
+
+---
+
+#### 2. تحديد قائمة سيرفرات المطاعم (متغير `SERVERS_JSON`):
+في نفس صفحة GitHub Settings:
+* اضغط على تبويب **Variables** (بجوار Secrets).
+* اضغط **New repository variable**.
+* الاسم: `SERVERS_JSON`
+* القيمة (ضع قائمة الـ VPS الخاصة بكل مطعم في مصفوفة JSON مع تحديد مسار المشروع `path` على كل سيرفر):
+```json
+[
+  {
+    "name": "مطعم فرع التجمع (Fit For Less)",
+    "host": "159.65.120.10",
+    "user": "root",
+    "port": 22,
+    "path": "/opt/saqr"
+  },
+  {
+    "name": "مطعم فرع المعادي",
+    "host": "167.99.85.20",
+    "user": "root",
+    "port": 22,
+    "path": "/var/www/saqr"
+  },
+  {
+    "name": "مطعم فرع الإسكندرية",
+    "host": "134.209.40.35",
+    "user": "root",
+    "port": 22,
+    "path": "/opt/saqr"
+  }
+]
+```
+> **ملاحظة ذكية حول `path`:** إضافة `"path"` تمنحك مرونة كاملة إذا كان هناك سيرفر تم تثبيت المشروع عليه في مسار مختلف (مثل `/var/www/saqr` أو مجلد مستخدم معين). وإذا تُرك `path` فارغاً، سيعتمد النظام تلقائياً المسار الافتراضي `/opt/saqr`.
+
+---
+
+### ➕ كيف تضيف سيرفر مطعم جديد مستقبلاً؟
+كل ما عليك فعله عند انضمام مطعم جديد هو:
+1. تجهيز الـ VPS وتثبيت الكود لأول مرة عبر `git clone git@github.com:essamalagamy1/saqr.git /opt/saqr`.
+2. إضافة الـ IP الخاص بمطعم العميل الجديد إلى متغير `SERVERS_JSON` في إعدادات GitHub.
+3. بمجرد أي `git push origin main`، سيقوم GitHub بتحديث كافة السيرفرات بما فيها السيرفر الجديد تلقائياً دون أي تدخل منك!
 
 ---
 **صَقْر — منظومة الذكاء الاصطناعي لرصد ومراقبة المنشآت**
