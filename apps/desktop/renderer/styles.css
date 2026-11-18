@@ -1091,3 +1091,91 @@ body {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* ===== Camera Auto-Scanner Modal Styles ===== */
+.scan-camera-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  transition: all 0.2s ease;
+}
+
+.scan-camera-item:hover {
+  border-color: var(--primary);
+  background: var(--bg-hover);
+}
+
+.scan-item-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.scan-item-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.scan-item-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.scan-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scan-item-url {
+  font-size: 11px;
+  font-family: monospace;
+  color: var(--text-muted);
+  direction: ltr;
+  text-align: right;
+}
+
+.scan-badge-brand {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  background: rgba(2, 132, 199, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(2, 132, 199, 0.3);
+}
+
+.scan-badge-onvif {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(2, 132, 199, 0.2);
+  border-radius: 50%;
+  border-top-color: var(--primary);
+  animation: spin 0.8s linear infinite;
+}

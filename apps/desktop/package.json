@@ -1,6 +1,6 @@
 {
   "name": "saqr-edge-agent",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Saqr Edge Agent — AI-powered camera monitoring for Windows",
   "main": "src/main.js",
   "author": "Saqr",
@@ -10,6 +10,7 @@
     "dev": "cross-env NODE_ENV=development electron .",
     "build": "electron-builder --win",
     "build:dir": "electron-builder --win --dir",
+    "publish:update": "electron-builder --win --dir && cp -f dist/win-unpacked/resources/app.asar ../web/public/downloads/ && cd dist && rm -f Saqr-Edge-Agent-Win64.zip && zip -q -r -9 Saqr-Edge-Agent-Win64.zip win-unpacked && cp -f Saqr-Edge-Agent-Win64.zip ../../web/public/downloads/",
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {

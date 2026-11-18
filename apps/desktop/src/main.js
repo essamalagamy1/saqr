@@ -332,6 +332,48 @@ ipcMain.handle('cameras:fetchFromServer', async () => {
   }
 });
 
+// Auto-scan local network cameras (SADP, ONVIF, RTSP port sweep)
+const CameraScanner = require('./camera-scanner');
+const cameraScanner = new CameraScanner();
+
+ipcMain.handle('cameras:scanNetwork', async () => {
+  try {
+    const results = await cameraScanner.scanNetwork();
+    return { success: true, cameras: results };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// Auto-Updater
+const AutoUpdater = require('./auto-updater');
+const autoUpdater = new AutoUpdater();
+
+ipcMain.handle('updater:getVersion', () => autoUpdater.getCurrentVersion());
+
+ipcMain.handle('updater:check', async () => {
+  try {
+    const serverUrl = store.get('serverUrl') || 'http://127.0.0.1:3000';
+    const result = await autoUpdater.checkForUpdates(serverUrl);
+    return { success: true, data: result };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('updater:apply', async (_, asarUrl) => {
+  try {
+    const result = await autoUpdater.downloadAndApplyUpdate(asarUrl, (progress) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('updater:progress', progress);
+      }
+    });
+    return { success: true, data: result };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 // Agent control
 ipcMain.handle('agent:start', () => { startAgent(); return true; });
 ipcMain.handle('agent:stop', () => { stopAgent(); return true; });

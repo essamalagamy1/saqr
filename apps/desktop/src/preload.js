@@ -36,6 +36,7 @@ const saqrBridge = {
     update: (id, updates) => ipcRenderer.invoke('cameras:update', id, updates),
     test: (rtspUrl) => ipcRenderer.invoke('cameras:test', rtspUrl),
     fetchFromServer: () => ipcRenderer.invoke('cameras:fetchFromServer'),
+    scanNetwork: () => ipcRenderer.invoke('cameras:scanNetwork'),
   },
 
   // Agent
@@ -43,6 +44,13 @@ const saqrBridge = {
     start: () => ipcRenderer.invoke('agent:start'),
     stop: () => ipcRenderer.invoke('agent:stop'),
     status: () => ipcRenderer.invoke('agent:status'),
+  },
+
+  // Auto Updater
+  updater: {
+    getVersion: () => ipcRenderer.invoke('updater:getVersion'),
+    check: () => ipcRenderer.invoke('updater:check'),
+    apply: (asarUrl) => ipcRenderer.invoke('updater:apply', asarUrl),
   },
 
   // Screenshot helper for verification
@@ -58,7 +66,7 @@ const saqrBridge = {
 
   // Events
   on: (channel, callback) => {
-    const validChannels = ['agent:detection', 'agent:status'];
+    const validChannels = ['agent:detection', 'agent:status', 'updater:progress'];
     if (validChannels.includes(channel)) {
       const listener = (_, data) => callback(data);
       ipcRenderer.on(channel, listener);

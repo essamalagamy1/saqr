@@ -473,6 +473,307 @@ rased.on('agent:status', (data) => {
   setAgentUI(data.running);
 });
 
+// ===== Camera Network Auto-Scan =====
+let discoveredCameras = [];
+
+async function startNetworkScan() {
+  const modal = document.getElementById('scanCamerasModal');
+  const statusBox = document.getElementById('scanStatusBox');
+  const spinner = document.getElementById('scanSpinner');
+  const statusTitle = document.getElementById('scanStatusTitle');
+  const statusSubtitle = document.getElementById('scanStatusSubtitle');
+  const resultsList = document.getElementById('scanResultsList');
+  const emptyState = document.getElementById('scanEmptyState');
+  const btnAddAll = document.getElementById('btnAddAllScanned');
+  const btnRescan = document.getElementById('btnRescan');
+
+  modal.style.display = 'flex';
+  statusBox.style.display = 'flex';
+  statusBox.style.background = 'rgba(2, 132, 199, 0.08)';
+  statusBox.style.borderColor = 'rgba(2, 132, 199, 0.25)';
+  spinner.style.display = 'inline-block';
+  statusTitle.textContent = 'جاري فحص الشبكة المحلية بحثاً عن الكاميرات...';
+  statusSubtitle.textContent = 'يتم الاستعلام عبر بروتوكولات SADP (EZVIZ/Hikvision) و ONVIF ومسح منافذ RTSP';
+  resultsList.innerHTML = '';
+  emptyState.style.display = 'none';
+  btnAddAll.style.display = 'none';
+  btnRescan.disabled = true;
+
+  try {
+    const response = await rased.cameras.scanNetwork();
+    btnRescan.disabled = false;
+    spinner.style.display = 'none';
+
+    if (!response.success) {
+      statusBox.style.background = 'rgba(239, 68, 68, 0.1)';
+      statusBox.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+      statusTitle.textContent = 'تعذر إتمام الفحص';
+      statusSubtitle.textContent = response.error || 'حدث خطأ أثناء فحص الشبكة';
+      return;
+    }
+
+    discoveredCameras = response.cameras || [];
+
+    if (discoveredCameras.length === 0) {
+      statusBox.style.display = 'none';
+      emptyState.style.display = 'block';
+      return;
+    }
+
+    // Success with cameras found
+    statusBox.style.background = 'rgba(16, 185, 129, 0.1)';
+    statusBox.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+    statusTitle.textContent = `تم العثور على (${discoveredCameras.length}) كاميرا على شبكتك المحلية!`;
+    statusSubtitle.textContent = 'يمكنك إضافة الكاميرات المختارة للمراقبة فوراً';
+
+    document.getElementById('scannedCountBadge').textContent = discoveredCameras.length;
+    btnAddAll.style.display = 'inline-flex';
+
+    renderDiscoveredCamerasList();
+  } catch (err) {
+    btnRescan.disabled = false;
+    spinner.style.display = 'none';
+    statusBox.style.background = 'rgba(239, 68, 68, 0.1)';
+    statusBox.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+    statusTitle.textContent = 'خطأ أثناء الفحص';
+    statusSubtitle.textContent = err.message || 'حدث خطأ غير متوقع';
+  }
+}
+
+async function renderDiscoveredCamerasList() {
+  const resultsList = document.getElementById('scanResultsList');
+  const existingCameras = await rased.cameras.list();
+
+  resultsList.innerHTML = discoveredCameras.map((cam, idx) => {
+    // Check if camera is already in saved list (match IP or RTSP URL)
+    const isAlreadyAdded = existingCameras.some(c => 
+      (c.rtspUrl && c.rtspUrl.includes(cam.ip)) || 
+      (c.name && c.name === cam.name)
+    );
+
+    const isHikEzviz = (cam.brand || '').includes('EZVIZ') || (cam.brand || '').includes('Hikvision');
+    const badgeClass = isHikEzviz ? 'scan-badge-brand' : 'scan-badge-onvif';
+
+    return `
+      <div class="scan-camera-item" id="scanned-cam-${idx}">
+        <div class="scan-item-info">
+          <div class="scan-item-icon">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
+              <circle cx="12" cy="13" r="3"/>
+            </svg>
+          </div>
+          <div class="scan-item-details">
+            <div class="scan-item-title">
+              <span>${escapeHtml(cam.name)}</span>
+              <span class="${badgeClass}">${escapeHtml(cam.brand)}</span>
+            </div>
+            <div class="scan-item-url">${escapeHtml(cam.rtspUrl)}</div>
+          </div>
+        </div>
+        <div>
+          ${isAlreadyAdded ? `
+            <button class="btn btn-secondary" style="font-size: 11px; padding: 6px 10px; cursor: default; opacity: 0.8;" disabled>
+              ✓ مضافة بالفعل
+            </button>
+          ` : `
+            <button class="btn btn-primary" onclick="addSingleScannedCamera(${idx})" id="btnAddScanned-${idx}" style="font-size: 11px; padding: 6px 12px;">
+              + إضافة للمراقبة
+            </button>
+          `}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function addSingleScannedCamera(index) {
+  const cam = discoveredCameras[index];
+  if (!cam) return;
+
+  const btn = document.getElementById(`btnAddScanned-${index}`);
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'جاري الإضافة...';
+  }
+
+  await rased.cameras.add({
+    name: cam.name,
+    rtspUrl: cam.rtspUrl,
+    enabled: true,
+  });
+
+  if (btn) {
+    btn.className = 'btn btn-secondary';
+    btn.textContent = '✓ تمت الإضافة';
+    btn.style.opacity = '0.8';
+  }
+
+  loadCameras();
+}
+
+async function addAllDiscoveredCameras() {
+  const btn = document.getElementById('btnAddAllScanned');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'جاري إضافة الكاميرات...';
+  }
+
+  for (let i = 0; i < discoveredCameras.length; i++) {
+    const cam = discoveredCameras[i];
+    await rased.cameras.add({
+      name: cam.name,
+      rtspUrl: cam.rtspUrl,
+      enabled: true,
+    });
+  }
+
+  closeScanModal();
+  loadCameras();
+  alert(`تمت إضافة ${discoveredCameras.length} كاميرات إلى قائمة المراقبة بنجاح! إذا كانت الكاميرا تتطلب كود تحقق أو باسوورد، يمكنك إدخاله بالنقر على أيقونة المفتاح.`);
+}
+
+function closeScanModal() {
+  document.getElementById('scanCamerasModal').style.display = 'none';
+}
+
+// ===== Auto-Updater =====
+let currentAppUpdate = null;
+
+async function openUpdateModal() {
+  document.getElementById('updateAppModal').style.display = 'flex';
+  checkAppUpdates(true);
+}
+
+function closeUpdateModal() {
+  document.getElementById('updateAppModal').style.display = 'none';
+}
+
+async function checkAppUpdates(isUserInitiated = false) {
+  const checkingBox = document.getElementById('updateCheckingBox');
+  const upToDateBox = document.getElementById('updateUpToDateBox');
+  const availableBox = document.getElementById('updateAvailableBox');
+  const errorBox = document.getElementById('updateErrorBox');
+  const btnApply = document.getElementById('btnApplyUpdate');
+  const navBadge = document.getElementById('updateNavBadge');
+  const progressContainer = document.getElementById('updateProgressContainer');
+
+  if (isUserInitiated) {
+    checkingBox.style.display = 'block';
+    upToDateBox.style.display = 'none';
+    availableBox.style.display = 'none';
+    errorBox.style.display = 'none';
+    btnApply.style.display = 'none';
+    progressContainer.style.display = 'none';
+  }
+
+  try {
+    const res = await rased.updater.check();
+
+    if (!res.success) {
+      if (isUserInitiated) {
+        checkingBox.style.display = 'none';
+        errorBox.style.display = 'block';
+        document.getElementById('updateErrorMsg').textContent = res.error || 'فشل الاتصال بالخادم';
+      }
+      return;
+    }
+
+    const data = res.data;
+    currentAppUpdate = data;
+
+    // Update version badges across UI
+    const curVer = data.currentVersion ? `v${data.currentVersion}` : 'v1.0.0';
+    if (document.getElementById('sidebarVersionText')) document.getElementById('sidebarVersionText').textContent = curVer;
+    if (document.getElementById('settingsVersionText')) document.getElementById('settingsVersionText').textContent = curVer;
+    if (document.getElementById('uptodateVersionTag')) document.getElementById('uptodateVersionTag').textContent = curVer;
+
+    if (data.hasUpdate) {
+      // Show badge in sidebar
+      if (navBadge) navBadge.style.display = 'inline-block';
+
+      if (isUserInitiated) {
+        checkingBox.style.display = 'none';
+        availableBox.style.display = 'block';
+        document.getElementById('remoteVersionTag').textContent = `v${data.latestVersion}`;
+        document.getElementById('currentVersionTag').textContent = curVer;
+
+        const changelogList = document.getElementById('changelogList');
+        if (data.changelog && data.changelog.length > 0) {
+          changelogList.innerHTML = data.changelog.map(item => `<li>${escapeHtml(item)}</li>`).join('');
+        } else {
+          changelogList.innerHTML = '<li>تحسينات في الأداء وسرعة الاستجابة</li>';
+        }
+
+        btnApply.style.display = 'inline-block';
+      }
+    } else {
+      if (navBadge) navBadge.style.display = 'none';
+
+      if (isUserInitiated) {
+        checkingBox.style.display = 'none';
+        upToDateBox.style.display = 'block';
+      }
+    }
+  } catch (err) {
+    if (isUserInitiated) {
+      checkingBox.style.display = 'none';
+      errorBox.style.display = 'block';
+      document.getElementById('updateErrorMsg').textContent = err.message || 'خطأ غير متوقع';
+    }
+  }
+}
+
+async function applyAppUpdate() {
+  if (!currentAppUpdate || !currentAppUpdate.asarUrl) {
+    alert('رابط التحديث غير متوفر');
+    return;
+  }
+
+  const btnApply = document.getElementById('btnApplyUpdate');
+  const progressContainer = document.getElementById('updateProgressContainer');
+  const progressBar = document.getElementById('updateProgressBar');
+  const progressPercent = document.getElementById('updateProgressPercent');
+  const progressStatus = document.getElementById('updateProgressStatus');
+
+  btnApply.disabled = true;
+  btnApply.textContent = 'جاري التحميل...';
+  progressContainer.style.display = 'block';
+  progressBar.style.width = '0%';
+  progressPercent.textContent = '0%';
+  progressStatus.textContent = 'جاري تحميل ملفات التحديث من الخادم...';
+
+  try {
+    const res = await rased.updater.apply(currentAppUpdate.asarUrl);
+
+    if (res.success) {
+      progressBar.style.width = '100%';
+      progressPercent.textContent = '100%';
+      progressStatus.textContent = res.data?.message || 'تم التحميل بنجاح! جاري إعادة التشغيل لتطبيق التحديث...';
+      btnApply.textContent = '✓ جاري إعادة التشغيل...';
+    } else {
+      btnApply.disabled = false;
+      btnApply.textContent = 'إعادة المحاولة';
+      progressStatus.textContent = 'فشل تطبيق التحديث: ' + res.error;
+    }
+  } catch (err) {
+    btnApply.disabled = false;
+    btnApply.textContent = 'إعادة المحاولة';
+    progressStatus.textContent = 'خطأ: ' + err.message;
+  }
+}
+
+// Progress listener from IPC
+rased.on('updater:progress', (p) => {
+  const progressBar = document.getElementById('updateProgressBar');
+  const progressPercent = document.getElementById('updateProgressPercent');
+  const progressBytes = document.getElementById('updateProgressBytes');
+
+  if (progressBar) progressBar.style.width = `${p.percent}%`;
+  if (progressPercent) progressPercent.textContent = `${p.percent}%`;
+  if (progressBytes) progressBytes.textContent = `${p.downloadedMB} / ${p.totalMB} MB`;
+});
+
 // ===== Init =====
 async function init() {
   const cameras = await rased.cameras.list();
@@ -481,6 +782,15 @@ async function init() {
 
   const status = await rased.agent.status();
   setAgentUI(status.running);
+
+  try {
+    const appVersion = await rased.updater.getVersion();
+    if (document.getElementById('sidebarVersionText')) document.getElementById('sidebarVersionText').textContent = `v${appVersion}`;
+    if (document.getElementById('settingsVersionText')) document.getElementById('settingsVersionText').textContent = `v${appVersion}`;
+  } catch {}
+
+  // Background check for updates without opening modal
+  setTimeout(() => checkAppUpdates(false), 2500);
 }
 
 init();

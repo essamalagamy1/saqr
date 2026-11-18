@@ -80,3 +80,10 @@ temp/
 
 # ---- Data volumes (local dev) ----
 data/
+
+# ---- Desktop Binaries & Archives ----
+*.zip
+*.asar
+apps/web/public/downloads/*.zip
+apps/web/public/downloads/*.asar
+
