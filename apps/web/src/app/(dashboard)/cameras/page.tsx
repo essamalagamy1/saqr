@@ -50,7 +50,7 @@ export default function CamerasPage() {
   const [newCamera, setNewCamera] = useState({
     name: '',
     branch_id: '',
-    dvr_ip: '192.168.100.53',
+    dvr_ip: '',
     dvr_channel: 'CH1',
     protocol: 'rtsp',
   });
@@ -181,7 +181,7 @@ export default function CamerasPage() {
       setNewCamera({
         name: '',
         branch_id: branches[0]?.id || '',
-        dvr_ip: '192.168.100.53',
+        dvr_ip: '',
         dvr_channel: `CH${cameras.length + 1}`,
         protocol: 'rtsp',
       });

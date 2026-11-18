@@ -30,6 +30,7 @@ export default function DashboardPage() {
     unread_detections: 0,
   });
 
+  const [liveCameras, setLiveCameras] = useState<any[]>([]);
   const [recentDetections, setRecentDetections] = useState<any[]>([]);
   const [isLiveApi, setIsLiveApi] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
@@ -41,10 +42,15 @@ export default function DashboardPage() {
 
   const fetchLiveStats = async () => {
     try {
-      const statsData = await api.get<any>('/detections/stats');
+      const [statsData, detData, camsData] = await Promise.all([
+        api.get<any>('/detections/stats').catch(() => null),
+        api.get<any[]>('/detections/').catch(() => []),
+        api.get<any[]>('/cameras/').catch(() => []),
+      ]);
+
       if (statsData) {
         setStats({
-          active_cameras: statsData.active_cameras ?? 0,
+          active_cameras: statsData.active_cameras ?? (Array.isArray(camsData) ? camsData.length : 0),
           active_services: statsData.active_services ?? 0,
           total_detections: statsData.total_detections ?? 0,
           unread_detections: statsData.unread_detections ?? 0,
@@ -52,9 +58,12 @@ export default function DashboardPage() {
         setIsLiveApi(true);
       }
 
-      const detData = await api.get<any[]>('/detections/');
       if (detData && Array.isArray(detData)) {
         setRecentDetections(detData.slice(0, 4));
+      }
+
+      if (camsData && Array.isArray(camsData)) {
+        setLiveCameras(camsData);
       }
     } catch (e) {
       console.error('Error fetching live stats:', e);
@@ -198,9 +207,11 @@ export default function DashboardPage() {
       <div className="rounded-xl border border-slate-800/80 bg-[#0d1527] p-5">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
+            <span className={`h-2 w-2 rounded-full ${liveCameras.length > 0 ? 'bg-emerald-500 animate-ping' : 'bg-slate-600'}`} />
             <h2 className="text-sm font-bold text-white">معاينة البث الميداني الحي (Live Feeds)</h2>
-            <span className="text-xs text-slate-500">2 قنوات متصلة</span>
+            <span className="text-xs text-slate-500 font-mono">
+              {liveCameras.length > 0 ? `${liveCameras.length} قنوات متصلة` : 'لا توجد كاميرات متصلة'}
+            </span>
           </div>
           <Link href="/live" className="text-xs font-medium text-amber-400 hover:text-amber-300 flex items-center gap-1 transition">
             <span>فتح شبكة الكاميرات الكاملة</span>
@@ -208,38 +219,44 @@ export default function DashboardPage() {
           </Link>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Camera 1: Live Stream Preview */}
-          <div className="overflow-hidden rounded-lg border border-slate-800 bg-[#070b14]">
-            <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800/80 bg-slate-900/60 text-xs">
-              <span className="font-semibold text-slate-200">Fit 4 Less 1 - المدخل الرئيسي</span>
-              <span className="text-[10px] text-emerald-400 font-mono bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">LIVE • 1080p</span>
-            </div>
-            <div className="relative aspect-video w-full bg-black">
-              <iframe
-                src="http://localhost:8888/cam1/?controls=0&autoplay=1&muted=1"
-                className="w-full h-full border-0 pointer-events-none"
-                title="Fit 4 Less 1 - المدخل الرئيسي"
-              />
-            </div>
+        {liveCameras.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-slate-800 p-8 text-center text-slate-500">
+            <Camera className="h-8 w-8 mx-auto mb-2 text-slate-600" />
+            <p className="text-xs font-medium text-slate-300">لا توجد قنوات بث متصلة حالياً</p>
+            <p className="text-[11px] text-slate-500 mt-1 mb-4">قم بفحص الشبكة أو إضافة كاميرات جديدة من صفحة إدارة الكاميرات</p>
+            <Link
+              href="/cameras"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3.5 py-1.5 text-xs font-bold text-slate-950 hover:bg-amber-400 transition shadow-lg shadow-amber-500/20"
+            >
+              <span>إدارة وفحص الكاميرات</span>
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </Link>
           </div>
-
-          {/* Camera 2: Local WiFi Camera Preview */}
-          <div className="overflow-hidden rounded-lg border border-slate-800 bg-[#070b14] flex flex-col justify-between">
-            <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800/80 bg-slate-900/60 text-xs">
-              <span className="font-semibold text-slate-200">كاميرا شبكة الواي فاي المحلية</span>
-              <span className="text-[10px] text-amber-400 font-mono bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">RTSP • 192.168.100.53</span>
-            </div>
-            <div className="relative aspect-video w-full flex flex-col items-center justify-center p-6 text-center bg-slate-950/60">
-              <Camera className="h-8 w-8 text-amber-500/60 mb-2" />
-              <div className="text-xs font-semibold text-slate-300">كاميرا EZVIZ على الشبكة المحلية</div>
-              <div className="text-[11px] text-slate-500 font-mono mt-1">rtsp://admin:****@192.168.100.53:554</div>
-              <span className="mt-3 rounded-full bg-amber-500/10 border border-amber-500/30 px-2.5 py-0.5 text-[10px] text-amber-400">
-                بانتظار إدخال كود التحقق في Edge Agent
-              </span>
-            </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {liveCameras.slice(0, 4).map((cam) => (
+              <div key={cam.id} className="overflow-hidden rounded-lg border border-slate-800 bg-[#070b14] flex flex-col justify-between">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800/80 bg-slate-900/60 text-xs">
+                  <span className="font-semibold text-slate-200 truncate">{cam.name}</span>
+                  <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                    cam.status === 'active' || cam.status === 'online'
+                      ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                      : 'text-slate-400 bg-slate-800 border-slate-700'
+                  }`}>
+                    {cam.dvr_channel || 'CH1'} • {cam.status === 'active' ? 'LIVE' : 'متصل'}
+                  </span>
+                </div>
+                <div className="relative aspect-video w-full flex flex-col items-center justify-center p-4 text-center bg-slate-950/60">
+                  <Video className="h-7 w-7 text-amber-500/60 mb-2" />
+                  <div className="text-xs font-semibold text-slate-300 truncate max-w-[90%]">{cam.name}</div>
+                  <div className="text-[10px] text-slate-500 font-mono mt-1" dir="ltr">
+                    {cam.dvr_ip ? `${cam.dvr_ip}:554` : 'RTSP Stream'}
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
-        </div>
+        )}
       </div>
 
       {/* 4. Real-time Incident Feed Table */}
@@ -286,7 +303,7 @@ export default function DashboardPage() {
                         : 'الآن'}
                     </td>
                     <td className="py-3 font-medium text-slate-200">
-                      {det.camera_name || 'Fit 4 Less 1 - المدخل الرئيسي'}
+                      {det.camera_name || 'كاميرا غير محددة'}
                     </td>
                     <td className="py-3 text-slate-100 font-semibold">
                       {det.type}

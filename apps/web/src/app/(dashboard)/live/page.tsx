@@ -174,7 +174,7 @@ export default function LiveFeedsPage() {
 
                 {/* DVR Channel Watermark */}
                 <div className="absolute top-3 left-3 text-[10px] font-mono text-slate-400 bg-black/60 px-2 py-0.5 rounded z-10">
-                  {cam.dvr_ip || '192.168.8.234'} • {cam.dvr_channel || `CH${idx + 1}`}
+                  {cam.dvr_ip || 'IP محلي'} • {cam.dvr_channel || `CH${idx + 1}`}
                 </div>
 
                 {/* Real Stream or Status Display */}
@@ -198,7 +198,7 @@ export default function LiveFeedsPage() {
                 {/* Bottom Quick Bar on hover */}
                 <div className="absolute bottom-2 inset-x-2 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity bg-black/80 backdrop-blur rounded-lg px-3 py-1.5 text-xs text-slate-300">
                   <span className="text-[11px] text-amber-400 font-semibold">
-                    {cam.zone_name || (cam.name.includes('المطبخ') ? 'المطبخ والتحضير' : 'المدخل الرئيسي')}
+                    {cam.zone_name || 'المنطقة العامة'}
                   </span>
                   
                   <button
