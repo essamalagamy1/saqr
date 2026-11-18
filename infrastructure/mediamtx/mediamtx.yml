@@ -1,0 +1,53 @@
+###############################################
+# MediaMTX Configuration — Rased
+###############################################
+
+# Global settings
+readTimeout: 10s
+writeTimeout: 10s
+writeQueueSize: 512
+logLevel: info
+logDestinations:
+  - stdout
+
+# API
+api: yes
+apiAddress: :9997
+
+# RTSP server
+rtsp: yes
+rtspAddress: :8554
+protocols: [udp, multicast, tcp]
+
+# WebRTC server
+webrtc: yes
+webrtcAddress: :8889
+webrtcLocalUDPAddress: :8189
+webrtcIPsFromInterfaces: yes
+
+# HLS server
+hls: yes
+hlsAddress: :8888
+hlsAlwaysRemux: no
+hlsSegmentCount: 7
+hlsSegmentDuration: 1s
+hlsPartDuration: 200ms
+
+# RTMP (disabled — not needed)
+rtmp: no
+
+# SRT (disabled — not needed)
+srt: no
+
+# Default path settings
+pathDefaults:
+  # Source settings
+  source: publisher
+  sourceOnDemand: no
+
+  # Recording (disabled by default)
+  record: no
+
+# Paths — allow any stream
+paths:
+  all_others:

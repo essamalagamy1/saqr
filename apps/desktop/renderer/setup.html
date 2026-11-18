@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>صَقْر — إعداد Edge Agent</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="setup-body">
+  <!-- Title Bar -->
+  <div class="titlebar">
+    <div class="titlebar-title">
+      <svg class="titlebar-logo-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/>
+      </svg>
+      <span>صَقْر Edge Agent — معالج التهيئة الأولي</span>
+    </div>
+    <div class="titlebar-controls">
+      <button class="titlebar-btn" onclick="rased.window.minimize()">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+      <button class="titlebar-btn titlebar-close" onclick="rased.window.close()">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="setup-container">
+    <!-- Header -->
+    <div class="setup-header">
+      <div class="setup-logo-badge">
+        <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/>
+          <path d="m9 12 2 2 4-4"/>
+        </svg>
+      </div>
+      <h1>مرحباً بك في منظومة صَقْر</h1>
+      <p class="setup-subtitle">ربط جهاز المراقبة المحلي بالخادم السحابي لمعالجة الكاميرات بذكاء YOLOX</p>
+    </div>
+
+    <!-- Steps Indicator -->
+    <div class="steps">
+      <div class="step active" id="step-indicator-1">
+        <span class="step-number">1</span>
+        <span class="step-label">الخادم</span>
+      </div>
+      <div class="step-line"></div>
+      <div class="step" id="step-indicator-2">
+        <span class="step-number">2</span>
+        <span class="step-label">الحساب</span>
+      </div>
+      <div class="step-line"></div>
+      <div class="step" id="step-indicator-3">
+        <span class="step-number">3</span>
+        <span class="step-label">التأكيد</span>
+      </div>
+    </div>
+
+    <!-- Step 1: Server URL -->
+    <div class="setup-step" id="step-1">
+      <div class="form-group">
+        <label for="serverUrl">عنوان المنصة أو الخادم السحابي (Server Domain / IP)</label>
+        <input type="text" id="serverUrl" placeholder="مثال: http://127.0.0.1:8080 أو https://saqr.domain.com" dir="ltr" autocomplete="off" autofocus>
+        <small class="form-hint">أدخل رابط الخادم المرفوع عليه API صَقْر (يمكنك كتابة العنوان المحلي أو الدومين الخارجي مباشرة)</small>
+      </div>
+      <div id="serverError" class="error-msg" style="display:none"></div>
+      <button class="btn btn-primary btn-full" id="btnNextStep1" onclick="goToStep2()">
+        <span>متابعة</span>
+        <span class="btn-arrow">←</span>
+      </button>
+    </div>
+
+    <!-- Step 2: Login Credentials -->
+    <div class="setup-step" id="step-2" style="display:none">
+      <div class="form-group">
+        <label for="email">البريد الإلكتروني للشركة / المشرف</label>
+        <input type="email" id="email" placeholder="user@company.com" dir="ltr" autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label for="password">كلمة المرور</label>
+        <div class="password-wrapper">
+          <input type="password" id="password" placeholder="••••••••" dir="ltr" autocomplete="current-password">
+          <button class="password-toggle" onclick="togglePassword()" type="button" title="إظهار / إخفاء كلمة المرور">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div id="loginError" class="error-msg" style="display:none"></div>
+      <div class="btn-row">
+        <button class="btn btn-secondary" onclick="goBackToStep1()">رجوع</button>
+        <button class="btn btn-primary" id="btnTestConnection" onclick="testConnection()">
+          <span id="testBtnText">ربط الجهاز والتحقق</span>
+          <span id="testBtnLoader" class="loader" style="display:none"></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Step 3: Confirmation -->
+    <div class="setup-step" id="step-3" style="display:none">
+      <div class="success-box">
+        <div class="success-icon">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+        </div>
+        <h3>تم الربط والتحقق بنجاح!</h3>
+        <div class="connection-info">
+          <div class="info-row">
+            <span class="info-label">الخادم المستهدف:</span>
+            <span class="info-value" id="confirmServer"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">حساب المشرف:</span>
+            <span class="info-value" id="confirmEmail"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">المنشأة:</span>
+            <span class="info-value" id="confirmCompany"></span>
+          </div>
+        </div>
+      </div>
+      <div class="form-group" style="margin-top: 16px;">
+        <label class="checkbox-label">
+          <input type="checkbox" id="autoStart" checked>
+          <span>بدء تشغيل ومراقبة الكاميرات تلقائياً عند فتح النظام</span>
+        </label>
+      </div>
+      <button class="btn btn-primary btn-full" onclick="completeSetup()">
+        <span>الدخول للوحة التحكم</span>
+        <span class="btn-arrow">←</span>
+      </button>
+    </div>
+  </div>
+
+  <script src="setup.js"></script>
+</body>
+</html>

@@ -1,0 +1,103 @@
+services:
+  # PostgreSQL 17 with TimescaleDB extension
+  postgres:
+    image: timescale/timescaledb:latest-pg17
+    container_name: rased-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: rased
+      POSTGRES_PASSWORD: rased
+      POSTGRES_DB: rased
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rased -d rased"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # Redis 7
+  redis:
+    image: redis:7-alpine
+    container_name: rased-redis
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # EMQX MQTT Broker
+  emqx:
+    image: emqx/emqx:latest
+    container_name: rased-emqx
+    ports:
+      - "1883:1883"    # MQTT
+      - "8083:8083"    # WebSocket
+      - "18083:18083"  # Dashboard
+    environment:
+      EMQX_NAME: rased
+      EMQX_HOST: 127.0.0.1
+    volumes:
+      - emqx_data:/opt/emqx/data
+      - ./infrastructure/emqx/emqx.conf:/opt/emqx/etc/emqx.conf
+    healthcheck:
+      test: ["CMD", "emqx", "ctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # MinIO disabled for local dev (Use local disk or DigitalOcean Spaces in production)
+  # minio:
+  #   image: minio/minio:latest
+
+  # MediaMTX (RTSP→WebRTC)
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: rased-mediamtx
+    ports:
+      - "8554:8554"    # RTSP
+      - "8889:8889"    # WebRTC
+      - "8888:8888"    # HLS
+      - "9997:9997"    # API
+    volumes:
+      - ./infrastructure/mediamtx/mediamtx.yml:/mediamtx.yml
+    restart: unless-stopped
+
+  # Go Core Backend API
+  api:
+    build: ./apps/api
+    image: rased-api:latest
+    container_name: rased-api
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://rased:rased@postgres:5432/rased?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: rased-dev-secret-change-in-production
+      JWT_EXPIRY: 24h
+      PORT: "8080"
+      MQTT_BROKER: tcp://emqx:1883
+      MQTT_CLIENT_ID: rased-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  emqx_data:
+  minio_data:
