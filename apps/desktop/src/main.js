@@ -213,17 +213,70 @@ function isValidStreamUrl(str) {
   return s.startsWith('rtsp://') || s.startsWith('rtsps://') || s.startsWith('http://') || s.startsWith('https://');
 }
 
+function deduplicateCameras(cameras) {
+  if (!Array.isArray(cameras)) return [];
+  const seenIds = new Set();
+  const seenUrls = new Set();
+  const unique = [];
+
+  for (const c of cameras) {
+    if (!c || !c.id) continue;
+    // Normalize URL for comparison (ignore credentials when comparing endpoints)
+    const urlClean = (c.rtspUrl || '').replace(/^rtsp[s]?:\/\/[^@]+@/i, 'rtsp://').trim().toLowerCase();
+    
+    if (seenIds.has(c.id)) {
+      continue;
+    }
+    if (urlClean && seenUrls.has(urlClean)) {
+      continue;
+    }
+
+    seenIds.add(c.id);
+    if (urlClean) seenUrls.add(urlClean);
+    unique.push(c);
+  }
+  return unique;
+}
+
 // Camera management
-ipcMain.handle('cameras:list', () => store.get('cameras', []));
+ipcMain.handle('cameras:list', () => {
+  const raw = store.get('cameras', []);
+  const clean = deduplicateCameras(raw);
+  if (clean.length !== raw.length) {
+    store.set('cameras', clean);
+  }
+  return clean;
+});
+
 ipcMain.handle('cameras:add', (_, camera) => {
   if (!camera || typeof camera !== 'object') throw new Error('بيانات الكاميرا غير صالحة');
   if (!isValidStreamUrl(camera.rtspUrl)) throw new Error('رابط البث غير صالح. يجب أن يبدأ بـ rtsp:// أو http://');
 
-  const cameras = store.get('cameras', []);
+  const cameras = deduplicateCameras(store.get('cameras', []));
   const { v4: uuidv4 } = require('uuid');
   camera.id = camera.id || uuidv4();
   camera.enabled = camera.enabled !== false;
-  cameras.push(camera);
+
+  const urlClean = (camera.rtspUrl || '').replace(/^rtsp[s]?:\/\/[^@]+@/i, 'rtsp://').trim().toLowerCase();
+
+  // Find if exists by ID or by same stream endpoint
+  const existingIndex = cameras.findIndex(c => {
+    if (c.id === camera.id) return true;
+    const cUrlClean = (c.rtspUrl || '').replace(/^rtsp[s]?:\/\/[^@]+@/i, 'rtsp://').trim().toLowerCase();
+    return cUrlClean && urlClean && cUrlClean === urlClean;
+  });
+
+  if (existingIndex !== -1) {
+    // Preserve existing credentials or update
+    cameras[existingIndex] = {
+      ...cameras[existingIndex],
+      ...camera,
+      id: cameras[existingIndex].id // keep stable ID
+    };
+  } else {
+    cameras.push(camera);
+  }
+
   store.set('cameras', cameras);
   return camera;
 });

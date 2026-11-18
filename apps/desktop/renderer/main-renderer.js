@@ -302,8 +302,14 @@ async function testCameraConnection() {
 async function fetchServerCameras() {
   const result = await rased.cameras.fetchFromServer();
   if (result.success && result.data && result.data.length > 0) {
+    const existing = await rased.cameras.list();
+    let newCount = 0;
+    let updatedCount = 0;
+
     for (const cam of result.data) {
       const rtsp = cam.rtsp_url || (cam.dvr_ip ? `rtsp://${cam.dvr_ip}:554` : '');
+      const isExisting = existing.some(c => c.id === cam.id || (c.rtspUrl && rtsp && c.rtspUrl.includes(cam.dvr_ip || '---')));
+      
       await rased.cameras.add({
         id: cam.id,
         name: cam.name,
@@ -311,9 +317,12 @@ async function fetchServerCameras() {
         branchId: cam.branch_id || '',
         enabled: cam.status === 'active' || cam.status === 'online',
       });
+
+      if (isExisting) updatedCount++;
+      else newCount++;
     }
     loadCameras();
-    alert(`تمت مزامنة ${result.data.length} كاميرا بنجاح من الخادم السحابي!`);
+    alert(`تمت مزامنة الكاميرات مع الخادم بنجاح! (تمت إضافة ${newCount} وتحديث ${updatedCount} كاميرا دون أي تكرار).`);
   } else {
     alert(result.error || 'لم يتم العثور على كاميرات مسجلة في حسابك على الخادم.');
   }
