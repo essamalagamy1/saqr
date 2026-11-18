@@ -4,8 +4,11 @@ import net from 'net';
 import dgram from 'dgram';
 
 export interface DiscoveredCamera {
+  id?: string;
   ip: string;
   port: number;
+  channel?: number;
+  totalChannels?: number;
   brand: string;
   name: string;
   rtspUrl: string;
@@ -14,6 +17,40 @@ export interface DiscoveredCamera {
 
 export class CameraScanner {
   private isScanning = false;
+
+  detectChannels(model: string, xmlText: string = ''): number {
+    if (xmlText) {
+      const digMatch = xmlText.match(/<DigitalChannelNum>(\d+)<\/DigitalChannelNum>/i);
+      const anaMatch = xmlText.match(/<AnalogChannelNum>(\d+)<\/AnalogChannelNum>/i);
+      let count = 0;
+      if (digMatch) count += parseInt(digMatch[1], 10) || 0;
+      if (anaMatch) count += parseInt(anaMatch[1], 10) || 0;
+      if (count > 0) return count;
+
+      const chMatch = xmlText.match(/<(?:ChannelNum|TotalChannelNum)>(\d+)<\//i);
+      if (chMatch) {
+        const c = parseInt(chMatch[1], 10);
+        if (c > 0) return c;
+      }
+    }
+
+    if (model) {
+      const m = model.toUpperCase();
+      const hikMatch = m.match(/(?:DS|IDS)-[A-Z0-9]*?(?:7[1236789]|86|96)(04|08|16|32|64)/);
+      if (hikMatch) return parseInt(hikMatch[1], 10);
+
+      const nvrMatch = m.match(/(?:NVR|XVR|DVR|HVR)[A-Z0-9-]*?(04|08|16|32|64)/);
+      if (nvrMatch) return parseInt(nvrMatch[1], 10);
+
+      const poeMatch = m.match(/\/(\d{1,2})P\b/);
+      if (poeMatch) return parseInt(poeMatch[1], 10);
+
+      const explicitCh = m.match(/(\d{1,2})\s*CH\b/);
+      if (explicitCh) return parseInt(explicitCh[1], 10);
+    }
+
+    return 1;
+  }
 
   getLocalSubnets() {
     const interfaces = os.networkInterfaces();
@@ -60,14 +97,46 @@ export class CameraScanner {
     this.isScanning = true;
     const found = new Map<string, DiscoveredCamera>();
 
-    const addDevice = (ip: string, data: DiscoveredCamera) => {
-      if (!found.has(ip)) {
-        found.set(ip, data);
+    const addDevice = (key: string, data: DiscoveredCamera) => {
+      if (!found.has(key)) {
+        found.set(key, data);
       } else {
-        const cur = found.get(ip)!;
+        const cur = found.get(key)!;
         if (data.name && (!cur.name || cur.name.startsWith('كاميرا RTSP'))) {
-          found.set(ip, { ...cur, ...data });
+          found.set(key, { ...cur, ...data });
         }
+      }
+    };
+
+    const addDeviceOrChannels = (ip: string, model: string, brand: string, xmlText: string = '', defaultPort: number = 554) => {
+      const channels = this.detectChannels(model, xmlText);
+      const isMulti = channels > 1;
+
+      // If this IP was previously added as a single generic RTSP device, remove the generic single entry
+      if (isMulti && found.has(ip)) {
+        found.delete(ip);
+      }
+
+      for (let ch = 1; ch <= channels; ch++) {
+        const key = isMulti ? `${ip}_ch${ch}` : ip;
+        const name = isMulti
+          ? `كاميرا ${ch} (قناة ${ch}) — ${model}`
+          : `كاميرا ${model}`;
+        const rtspUrl = isMulti
+          ? `rtsp://${ip}:${defaultPort}/ch${ch}/main`
+          : `rtsp://${ip}:${defaultPort}/ch1/main`;
+
+        addDevice(key, {
+          id: key,
+          ip,
+          port: defaultPort,
+          channel: ch,
+          totalChannels: channels,
+          brand,
+          name,
+          rtspUrl,
+          needsCredentials: true,
+        });
       }
     };
 
@@ -104,14 +173,7 @@ export class CameraScanner {
               const ip = ipMatch ? ipMatch[1].trim() : rinfo.address;
               const model = modelMatch ? modelMatch[1].trim() : 'EZVIZ/Hikvision';
 
-              addDevice(ip, {
-                ip,
-                port: 554,
-                brand: 'EZVIZ / Hikvision',
-                name: `كاميرا ${model}`,
-                rtspUrl: `rtsp://${ip}:554/ch1/main`,
-                needsCredentials: true,
-              });
+              addDeviceOrChannels(ip, model, 'Hikvision / EZVIZ', text, 554);
             } catch {}
           });
 
@@ -150,14 +212,10 @@ export class CameraScanner {
 
           socket.on('message', (msg, rinfo) => {
             const ip = rinfo.address;
-            addDevice(ip, {
-              ip,
-              port: 554,
-              brand: 'ONVIF Camera',
-              name: `كاميرا ONVIF (${ip})`,
-              rtspUrl: `rtsp://${ip}:554/ch1/main`,
-              needsCredentials: true,
-            });
+            const alreadyHas = Array.from(found.keys()).some(k => k === ip || k.startsWith(`${ip}_`));
+            if (!alreadyHas) {
+              addDeviceOrChannels(ip, `ONVIF (${ip})`, 'ONVIF Camera', '', 554);
+            }
           });
 
           setTimeout(() => {
@@ -190,14 +248,10 @@ export class CameraScanner {
           sweepTasks.push(async () => {
             const isOpen = await checkPort(targetIp);
             if (isOpen) {
-              addDevice(targetIp, {
-                ip: targetIp,
-                port: 554,
-                brand: 'RTSP Stream',
-                name: `كاميرا RTSP (${targetIp})`,
-                rtspUrl: `rtsp://${targetIp}:554/ch1/main`,
-                needsCredentials: true,
-              });
+              const alreadyHas = Array.from(found.keys()).some(k => k === targetIp || k.startsWith(`${targetIp}_`));
+              if (!alreadyHas) {
+                addDeviceOrChannels(targetIp, `RTSP (${targetIp})`, 'RTSP Stream', '', 554);
+              }
             }
           });
         }

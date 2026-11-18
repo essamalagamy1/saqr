@@ -111,12 +111,13 @@ export default function CamerasPage() {
     setAddingIdx((prev) => ({ ...prev, [idx]: true }));
     try {
       const branchId = branches[0]?.id || '';
+      const channelStr = cam.channel ? `CH${cam.channel}` : 'CH1';
       await api.post('/cameras/', {
         name: cam.name,
         branch_id: branchId,
         rtsp_url: cam.rtspUrl,
         dvr_ip: cam.ip,
-        dvr_channel: 'CH1',
+        dvr_channel: channelStr,
         protocol: 'rtsp',
       });
       await loadData();
@@ -134,12 +135,13 @@ export default function CamerasPage() {
 
     try {
       for (const cam of discoveredCameras) {
+        const channelStr = cam.channel ? `CH${cam.channel}` : 'CH1';
         await api.post('/cameras/', {
           name: cam.name,
           branch_id: branchId,
           rtsp_url: cam.rtspUrl,
           dvr_ip: cam.ip,
-          dvr_channel: 'CH1',
+          dvr_channel: channelStr,
           protocol: 'rtsp',
         }).catch(() => {});
       }
@@ -389,9 +391,18 @@ export default function CamerasPage() {
               {/* Discovered Cameras List */}
               <div className="space-y-2.5">
                 {discoveredCameras.map((cam, idx) => {
-                  const isAlreadyAdded = cameras.some(
-                    (c) => (c.dvr_ip && c.dvr_ip === cam.ip) || (c.name && c.name === cam.name)
-                  );
+                  const isAlreadyAdded = cameras.some((c) => {
+                    if (c.name && c.name === cam.name) return true;
+                    if (c.dvr_ip && c.dvr_ip === cam.ip) {
+                      const chStr = cam.channel ? `CH${cam.channel}` : 'CH1';
+                      if (c.dvr_channel && c.dvr_channel.toUpperCase() === chStr) return true;
+                      if (c.rtsp_url && cam.rtspUrl) {
+                        return c.rtsp_url.includes(`/ch${cam.channel}/`) || c.rtsp_url.includes(`/${cam.channel}01`);
+                      }
+                      return !cam.channel;
+                    }
+                    return false;
+                  });
                   const isAdding = addingIdx[idx];
                   const isHikEzviz = cam.brand.includes('EZVIZ') || cam.brand.includes('Hikvision');
 

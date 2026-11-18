@@ -120,16 +120,17 @@ func (h *Handler) Create(c *fiber.Ctx) error {
 	}
 
 	// Check for existing camera in this company to prevent duplicates
+	// For NVR/DVR systems, multiple cameras share the same dvr_ip across different channels (CH1..CH8)
 	var existingID string
 	errCheck := h.db.QueryRow(c.Context(), `
 		SELECT c.id FROM cameras c
 		JOIN branches b ON c.branch_id = b.id
 		WHERE b.company_id = $1 AND (
-			(c.dvr_ip != '' AND c.dvr_ip = $2) OR
-			($3 != '' AND c.rtsp_url_encrypted = $3) OR
-			(c.name = $4)
+			(c.dvr_ip != '' AND c.dvr_ip = $2 AND c.dvr_channel != '' AND c.dvr_channel = $3) OR
+			($4 != '' AND c.rtsp_url_encrypted = $4) OR
+			(c.name = $5)
 		) LIMIT 1
-	`, companyID, req.DvrIP, req.RtspURL, req.Name).Scan(&existingID)
+	`, companyID, req.DvrIP, req.DvrChannel, req.RtspURL, req.Name).Scan(&existingID)
 
 	var cam Camera
 	if errCheck == nil && existingID != "" {

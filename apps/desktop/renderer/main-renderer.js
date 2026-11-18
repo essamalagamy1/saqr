@@ -230,6 +230,40 @@ async function saveEditPassword() {
   }
 
   await rased.cameras.update(id, { rtspUrl });
+
+  // If this camera is part of an NVR (shares IP with other cameras),
+  // automatically update other channels on the same IP if they don't have credentials
+  try {
+    const user = document.getElementById('editCamUser').value.trim();
+    const pass = document.getElementById('editCamPass').value;
+    if (user && pass) {
+      const hostMatch = rtspUrl.match(/^rtsp[s]?:\/\/[^@]+@([^\/:]+)/i);
+      const camIp = hostMatch ? hostMatch[1] : null;
+      if (camIp) {
+        const allCams = await rased.cameras.list();
+        let syncedCount = 0;
+        for (const other of allCams) {
+          if (other.id !== id && other.rtspUrl && other.rtspUrl.includes(camIp)) {
+            const hasCreds = /rtsp[s]?:\/\/[^@]+@/i.test(other.rtspUrl);
+            if (!hasCreds) {
+              const updatedOtherUrl = other.rtspUrl.replace(
+                /^(rtsp[s]?:\/\/)(.*)$/i,
+                `$1${encodeURIComponent(user)}:${encodeURIComponent(pass)}@$2`
+              );
+              await rased.cameras.update(other.id, { rtspUrl: updatedOtherUrl });
+              syncedCount++;
+            }
+          }
+        }
+        if (syncedCount > 0) {
+          console.log(`[AUTH] Automatically applied credentials to ${syncedCount} other channels on ${camIp}`);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[AUTH] Error syncing credentials to other NVR channels:', err);
+  }
+
   closeEditPasswordModal();
   loadCameras();
 }
@@ -554,11 +588,20 @@ async function renderDiscoveredCamerasList() {
   const existingCameras = await rased.cameras.list();
 
   resultsList.innerHTML = discoveredCameras.map((cam, idx) => {
-    // Check if camera is already in saved list (match IP or RTSP URL)
-    const isAlreadyAdded = existingCameras.some(c => 
-      (c.rtspUrl && c.rtspUrl.includes(cam.ip)) || 
-      (c.name && c.name === cam.name)
-    );
+    // Check if camera is already in saved list (match specific channel or exact URL/name)
+    const isAlreadyAdded = existingCameras.some(c => {
+      if (c.name && c.name === cam.name) return true;
+      if (c.rtspUrl && cam.rtspUrl) {
+        if (c.rtspUrl === cam.rtspUrl) return true;
+        if (c.rtspUrl.includes(cam.ip)) {
+          if (cam.channel) {
+            return c.rtspUrl.includes(`/ch${cam.channel}/`) || c.rtspUrl.includes(`/${cam.channel}01`) || c.rtspUrl.includes(`channel=${cam.channel}`);
+          }
+          return true;
+        }
+      }
+      return false;
+    });
 
     const isHikEzviz = (cam.brand || '').includes('EZVIZ') || (cam.brand || '').includes('Hikvision');
     const badgeClass = isHikEzviz ? 'scan-badge-brand' : 'scan-badge-onvif';
