@@ -278,11 +278,47 @@ ipcMain.handle('cameras:add', (_, camera) => {
   }
 
   store.set('cameras', cameras);
+
+  // Sync added camera to Cloud API in background
+  (async () => {
+    try {
+      const serverUrl = store.get('serverUrl');
+      const token = store.get('accessToken');
+      if (serverUrl && token) {
+        const ApiClient = require('./api-client');
+        const client = new ApiClient(serverUrl, token);
+        const serverCam = await client.addCamera(camera);
+        if (serverCam && serverCam.id && serverCam.id !== camera.id) {
+          const currentCams = store.get('cameras', []);
+          const idx = currentCams.findIndex(c => c.id === camera.id);
+          if (idx !== -1) {
+            currentCams[idx].id = serverCam.id;
+            store.set('cameras', currentCams);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[CAMERA_SYNC] Cloud sync warning:', err.message);
+    }
+  })();
+
   return camera;
 });
-ipcMain.handle('cameras:remove', (_, id) => {
+ipcMain.handle('cameras:remove', async (_, id) => {
   const cameras = store.get('cameras', []).filter(c => c.id !== id);
   store.set('cameras', cameras);
+
+  // Sync deletion to Cloud API
+  try {
+    const serverUrl = store.get('serverUrl');
+    const token = store.get('accessToken');
+    if (serverUrl && token && id) {
+      const ApiClient = require('./api-client');
+      const client = new ApiClient(serverUrl, token);
+      await client.deleteCamera(id).catch(() => {});
+    }
+  } catch {}
+
   return true;
 });
 ipcMain.handle('cameras:toggle', (_, id) => {

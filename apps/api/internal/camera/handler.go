@@ -54,7 +54,7 @@ func (h *Handler) List(c *fiber.Ctx) error {
 
 	query := `
 		SELECT c.id, c.branch_id, c.zone_id, b.name as branch_name, COALESCE(z.name, '') as zone_name,
-		       c.name, COALESCE(c.dvr_ip, ''), COALESCE(c.dvr_channel, ''), c.protocol, 
+		       c.name, COALESCE(c.rtsp_url_encrypted, '') as rtsp_url, COALESCE(c.dvr_ip, ''), COALESCE(c.dvr_channel, ''), c.protocol, 
 		       c.resolution, c.fps, c.status, c.last_seen_at, c.config::text, c.created_at, c.updated_at
 		FROM cameras c
 		JOIN branches b ON c.branch_id = b.id
@@ -81,7 +81,7 @@ func (h *Handler) List(c *fiber.Ctx) error {
 		var cam Camera
 		if err := rows.Scan(
 			&cam.ID, &cam.BranchID, &cam.ZoneID, &cam.BranchName, &cam.ZoneName,
-			&cam.Name, &cam.DvrIP, &cam.DvrChannel, &cam.Protocol,
+			&cam.Name, &cam.RtspURL, &cam.DvrIP, &cam.DvrChannel, &cam.Protocol,
 			&cam.Resolution, &cam.FPS, &cam.Status, &cam.LastSeenAt, &cam.Config, &cam.CreatedAt, &cam.UpdatedAt,
 		); err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"success": false, "error": err.Error()})
@@ -92,11 +92,21 @@ func (h *Handler) List(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"success": true, "data": cameras})
 }
 
-// Create creates a new camera
+// Create creates a new camera or updates existing one to prevent duplicates
 func (h *Handler) Create(c *fiber.Ctx) error {
+	companyID := c.Locals("company_id").(string)
+
 	var req CreateCameraRequest
-	if err := c.BodyParser(&req); err != nil || req.Name == "" || req.BranchID == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"success": false, "error": "Name and branch_id are required"})
+	if err := c.BodyParser(&req); err != nil || req.Name == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"success": false, "error": "Camera name is required"})
+	}
+
+	// Auto-resolve branch_id if omitted
+	if req.BranchID == "" {
+		_ = h.db.QueryRow(c.Context(), `SELECT id FROM branches WHERE company_id = $1 ORDER BY created_at ASC LIMIT 1`, companyID).Scan(&req.BranchID)
+		if req.BranchID == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"success": false, "error": "No branch found for this company"})
+		}
 	}
 
 	if req.Protocol == "" {
@@ -109,14 +119,48 @@ func (h *Handler) Create(c *fiber.Ctx) error {
 		req.FPS = 25
 	}
 
+	// Check for existing camera in this company to prevent duplicates
+	var existingID string
+	errCheck := h.db.QueryRow(c.Context(), `
+		SELECT c.id FROM cameras c
+		JOIN branches b ON c.branch_id = b.id
+		WHERE b.company_id = $1 AND (
+			(c.dvr_ip != '' AND c.dvr_ip = $2) OR
+			($3 != '' AND c.rtsp_url_encrypted = $3) OR
+			(c.name = $4)
+		) LIMIT 1
+	`, companyID, req.DvrIP, req.RtspURL, req.Name).Scan(&existingID)
+
+	var cam Camera
+	if errCheck == nil && existingID != "" {
+		// Update existing camera rather than duplicating
+		updateQuery := `
+			UPDATE cameras
+			SET name = $1,
+			    rtsp_url_encrypted = COALESCE(NULLIF($2, ''), rtsp_url_encrypted),
+			    dvr_ip = COALESCE(NULLIF($3, ''), dvr_ip),
+			    dvr_channel = COALESCE(NULLIF($4, ''), dvr_channel),
+			    status = 'active',
+			    updated_at = NOW()
+			WHERE id = $5
+			RETURNING id, branch_id, zone_id, name, COALESCE(rtsp_url_encrypted, ''), COALESCE(dvr_ip, ''), COALESCE(dvr_channel, ''), protocol, resolution, fps, status, created_at, updated_at
+		`
+		err := h.db.QueryRow(c.Context(), updateQuery, req.Name, req.RtspURL, req.DvrIP, req.DvrChannel, existingID).Scan(
+			&cam.ID, &cam.BranchID, &cam.ZoneID, &cam.Name, &cam.RtspURL, &cam.DvrIP, &cam.DvrChannel, &cam.Protocol, &cam.Resolution, &cam.FPS, &cam.Status, &cam.CreatedAt, &cam.UpdatedAt,
+		)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"success": false, "error": err.Error()})
+		}
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{"success": true, "data": cam, "updated": true})
+	}
+
 	query := `
 		INSERT INTO cameras (branch_id, zone_id, name, rtsp_url_encrypted, dvr_ip, dvr_channel, protocol, resolution, fps, status)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active')
-		RETURNING id, branch_id, zone_id, name, COALESCE(dvr_ip, ''), COALESCE(dvr_channel, ''), protocol, resolution, fps, status, created_at, updated_at
+		RETURNING id, branch_id, zone_id, name, COALESCE(rtsp_url_encrypted, ''), COALESCE(dvr_ip, ''), COALESCE(dvr_channel, ''), protocol, resolution, fps, status, created_at, updated_at
 	`
-	var cam Camera
 	err := h.db.QueryRow(c.Context(), query, req.BranchID, req.ZoneID, req.Name, req.RtspURL, req.DvrIP, req.DvrChannel, req.Protocol, req.Resolution, req.FPS).Scan(
-		&cam.ID, &cam.BranchID, &cam.ZoneID, &cam.Name, &cam.DvrIP, &cam.DvrChannel, &cam.Protocol, &cam.Resolution, &cam.FPS, &cam.Status, &cam.CreatedAt, &cam.UpdatedAt,
+		&cam.ID, &cam.BranchID, &cam.ZoneID, &cam.Name, &cam.RtspURL, &cam.DvrIP, &cam.DvrChannel, &cam.Protocol, &cam.Resolution, &cam.FPS, &cam.Status, &cam.CreatedAt, &cam.UpdatedAt,
 	)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"success": false, "error": err.Error()})

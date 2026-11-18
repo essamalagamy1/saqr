@@ -89,6 +89,53 @@ class ApiClient {
     return data.data || [];
   }
 
+  async addCamera(camera) {
+    let dvrIp = '';
+    let dvrChannel = 'CH1';
+    const rtsp = camera.rtspUrl || '';
+
+    const ipMatch = rtsp.match(/@?([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})/);
+    if (ipMatch) {
+      dvrIp = ipMatch[1];
+    }
+
+    const payload = {
+      name: camera.name,
+      branch_id: camera.branchId || '',
+      rtsp_url: camera.rtspUrl || '',
+      dvr_ip: dvrIp,
+      dvr_channel: dvrChannel,
+      protocol: 'rtsp',
+      status: camera.enabled ? 'active' : 'disconnected',
+    };
+
+    const res = await fetch(`${this.baseUrl}/cameras/`, {
+      method: 'POST',
+      headers: this.headers,
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || body.message || `Failed to sync camera to server (${res.status})`);
+    }
+
+    const data = await res.json();
+    return data.data;
+  }
+
+  async deleteCamera(id) {
+    try {
+      const res = await fetch(`${this.baseUrl}/cameras/${id}`, {
+        method: 'DELETE',
+        headers: this.headers,
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
   async postDetection(detection) {
     const res = await fetch(`${this.baseUrl}/detections/ingest`, {
       method: 'POST',

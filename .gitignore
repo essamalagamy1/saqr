@@ -84,6 +84,7 @@ data/
 # ---- Desktop Binaries & Archives ----
 *.zip
 *.asar
+*.tsbuildinfo
 apps/web/public/downloads/*.zip
 apps/web/public/downloads/*.asar
 

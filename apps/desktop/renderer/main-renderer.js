@@ -14,7 +14,10 @@ function showPage(page) {
   if (targetPage) targetPage.classList.add('active');
   if (targetNav) targetNav.classList.add('active');
 
-  if (page === 'cameras') loadCameras();
+  if (page === 'cameras') {
+    loadCameras();
+    fetchServerCameras(true);
+  }
   if (page === 'settings') loadSettings();
 }
 
@@ -299,32 +302,38 @@ async function testCameraConnection() {
   }
 }
 
-async function fetchServerCameras() {
-  const result = await rased.cameras.fetchFromServer();
-  if (result.success && result.data && result.data.length > 0) {
-    const existing = await rased.cameras.list();
-    let newCount = 0;
-    let updatedCount = 0;
+async function fetchServerCameras(silent = false) {
+  try {
+    const result = await rased.cameras.fetchFromServer();
+    if (result.success && result.data && result.data.length > 0) {
+      const existing = await rased.cameras.list();
+      let newCount = 0;
+      let updatedCount = 0;
 
-    for (const cam of result.data) {
-      const rtsp = cam.rtsp_url || (cam.dvr_ip ? `rtsp://${cam.dvr_ip}:554` : '');
-      const isExisting = existing.some(c => c.id === cam.id || (c.rtspUrl && rtsp && c.rtspUrl.includes(cam.dvr_ip || '---')));
-      
-      await rased.cameras.add({
-        id: cam.id,
-        name: cam.name,
-        rtspUrl: rtsp,
-        branchId: cam.branch_id || '',
-        enabled: cam.status === 'active' || cam.status === 'online',
-      });
+      for (const cam of result.data) {
+        const rtsp = cam.rtsp_url || (cam.dvr_ip ? `rtsp://${cam.dvr_ip}:554/ch1/main` : '');
+        const isExisting = existing.some(c => c.id === cam.id || (c.rtspUrl && rtsp && c.rtspUrl.includes(cam.dvr_ip || '---')));
+        
+        await rased.cameras.add({
+          id: cam.id,
+          name: cam.name,
+          rtspUrl: rtsp,
+          branchId: cam.branch_id || '',
+          enabled: cam.status === 'active' || cam.status === 'online',
+        });
 
-      if (isExisting) updatedCount++;
-      else newCount++;
+        if (isExisting) updatedCount++;
+        else newCount++;
+      }
+      loadCameras();
+      if (!silent) {
+        alert(`تمت مزامنة الكاميرات مع الخادم بنجاح! (تمت إضافة ${newCount} وتحديث ${updatedCount} كاميرا دون أي تكرار).`);
+      }
+    } else if (!silent) {
+      alert(result.error || 'لم يتم العثور على كاميرات مسجلة في حسابك على الخادم.');
     }
-    loadCameras();
-    alert(`تمت مزامنة الكاميرات مع الخادم بنجاح! (تمت إضافة ${newCount} وتحديث ${updatedCount} كاميرا دون أي تكرار).`);
-  } else {
-    alert(result.error || 'لم يتم العثور على كاميرات مسجلة في حسابك على الخادم.');
+  } catch (err) {
+    if (!silent) alert('تعذر مزامنة الكاميرات: ' + err.message);
   }
 }
 
@@ -788,6 +797,9 @@ async function init() {
     if (document.getElementById('sidebarVersionText')) document.getElementById('sidebarVersionText').textContent = `v${appVersion}`;
     if (document.getElementById('settingsVersionText')) document.getElementById('settingsVersionText').textContent = `v${appVersion}`;
   } catch {}
+
+  // Auto-sync cameras from server in background on launch
+  setTimeout(() => fetchServerCameras(true), 1500);
 
   // Background check for updates without opening modal
   setTimeout(() => checkAppUpdates(false), 2500);
