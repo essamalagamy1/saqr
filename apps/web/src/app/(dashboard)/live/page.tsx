@@ -108,8 +108,9 @@ export default function LiveFeedsPage() {
             className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
           >
             <option value="all">كل الكاميرات المتصلة</option>
-            <option value="entrance">المدخل الرئيسي (بث مباشر)</option>
-            <option value="wifi">كاميرا شبكة الواي فاي (192.168.100.53)</option>
+            {Array.from(new Set(cameras.map(c => c.zone_name).filter(Boolean))).map((z) => (
+              <option key={z as string} value={z as string}>{z as string}</option>
+            ))}
           </select>
         </div>
 
@@ -127,7 +128,15 @@ export default function LiveFeedsPage() {
           </div>
         ) : displayedCameras.length === 0 ? (
           <div className="col-span-full py-16 text-center text-slate-500 rounded-xl border border-slate-800 bg-[#0d1527]">
-            لا توجد كاميرات مسجلة في هذه المنطقة
+            <CameraIcon className="h-10 w-10 text-slate-600 mx-auto mb-3" />
+            <div className="text-sm font-bold text-slate-300 mb-1">لا توجد كاميرات متصلة بالبث المباشر حالياً</div>
+            <p className="text-xs text-slate-500 mb-4">قم بفحص الشبكة أو إضافة كاميرات جديدة من صفحة إدارة الكاميرات</p>
+            <a
+              href="/cameras"
+              className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-amber-400 transition shadow-lg shadow-amber-500/20"
+            >
+              <span>الانتقال لإدارة وفحص الكاميرات</span>
+            </a>
           </div>
         ) : (
           displayedCameras.map((cam, idx) => (

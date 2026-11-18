@@ -24,8 +24,8 @@ import { api } from '@/lib/api';
 
 export default function DashboardPage() {
   const [stats, setStats] = useState({
-    active_cameras: 2,
-    active_services: 6,
+    active_cameras: 0,
+    active_services: 0,
     total_detections: 0,
     unread_detections: 0,
   });

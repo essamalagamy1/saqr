@@ -35,10 +35,10 @@ export function Sidebar() {
       api.get<any[]>('/tasks/').catch(() => []),
     ]).then(([services, cams, stats, tasks]) => {
       setCounts({
-        aiServices: services?.length || 6,
-        cameras: cams?.length || 2,
-        detections: stats?.unread_detections ?? stats?.total_detections ?? 0,
-        tasks: tasks?.filter((t: any) => t.status !== 'completed')?.length || 0,
+        aiServices: Array.isArray(services) ? services.filter((s: any) => s.is_active || s.status === 'active').length : 0,
+        cameras: Array.isArray(cams) ? cams.filter((c: any) => c.status === 'active' || c.status === 'online').length : 0,
+        detections: stats?.unread_detections ?? 0,
+        tasks: Array.isArray(tasks) ? tasks.filter((t: any) => t.status !== 'completed').length : 0,
       });
     });
   }, [pathname]);
@@ -58,7 +58,7 @@ export function Sidebar() {
           label: 'خدمات الذكاء الاصطناعي', 
           href: '/ai-services', 
           icon: BrainCircuit, 
-          badge: counts.aiServices !== undefined ? String(counts.aiServices) : undefined 
+          badge: counts.aiServices && counts.aiServices > 0 ? String(counts.aiServices) : undefined 
         },
       ],
     },
@@ -69,7 +69,7 @@ export function Sidebar() {
           label: 'البث المباشر للكاميرات', 
           href: '/live', 
           icon: Video, 
-          badge: counts.cameras !== undefined ? String(counts.cameras) : undefined 
+          badge: counts.cameras && counts.cameras > 0 ? String(counts.cameras) : undefined 
         },
         { 
           label: 'سجل الاكتشافات الموحد', 
