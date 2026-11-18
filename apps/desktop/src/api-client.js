@@ -90,23 +90,28 @@ class ApiClient {
   }
 
   async addCamera(camera) {
-    let dvrIp = '';
-    let dvrChannel = 'CH1';
-    const rtsp = camera.rtspUrl || '';
+    let dvrIp = camera.dvrIp || '';
+    let dvrChannel = camera.channel ? `CH${camera.channel}` : (camera.dvrChannel || 'CH1');
+    const rtsp = camera.rtspUrl || camera.rtsp_url || '';
 
     const ipMatch = rtsp.match(/@?([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})/);
-    if (ipMatch) {
+    if (ipMatch && !dvrIp) {
       dvrIp = ipMatch[1];
+    }
+
+    const chMatch = rtsp.match(/\/ch(\d+)\//i) || rtsp.match(/\/Streaming\/Channels\/(\d+)01/i) || rtsp.match(/\/(\d{1,2})01\b/i);
+    if (chMatch) {
+      dvrChannel = `CH${parseInt(chMatch[1], 10)}`;
     }
 
     const payload = {
       name: camera.name,
-      branch_id: camera.branchId || '',
-      rtsp_url: camera.rtspUrl || '',
+      branch_id: camera.branchId || camera.branch_id || '',
+      rtsp_url: rtsp,
       dvr_ip: dvrIp,
       dvr_channel: dvrChannel,
-      protocol: 'rtsp',
-      status: camera.enabled ? 'active' : 'disconnected',
+      protocol: camera.protocol || 'rtsp',
+      status: camera.enabled !== false ? 'active' : 'disconnected',
     };
 
     const res = await fetch(`${this.baseUrl}/cameras/`, {
@@ -133,6 +138,30 @@ class ApiClient {
       return res.ok;
     } catch {
       return false;
+    }
+  }
+
+  async uploadCameraFrame(cameraId, cameraIp, cameraChannel, frameBuffer) {
+    if (!frameBuffer || frameBuffer.length === 0) return;
+    try {
+      let cleanServer = this.serverUrl.replace(/\/api\/v1\/?$/, '').replace(/\/+$/, '');
+      if (cleanServer.includes(':8080')) {
+        cleanServer = cleanServer.replace(':8080', ':3000');
+      }
+      const url = `${cleanServer}/api/cameras/stream`;
+      await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'x-camera-id': cameraId || '',
+          'x-camera-ip': cameraIp || '',
+          'x-camera-channel': cameraChannel || 'CH1',
+        },
+        body: frameBuffer,
+        timeout: 5000,
+      });
+    } catch {
+      // Non-blocking upload
     }
   }
 

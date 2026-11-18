@@ -160,6 +160,16 @@ function stopAgent() {
   }
 }
 
+function reloadAgentIfRunning() {
+  if (agentWorker && agentWorker.running) {
+    try {
+      agentWorker.reloadCameras();
+    } catch (err) {
+      console.warn('[AGENT] Failed to reload cameras:', err.message);
+    }
+  }
+}
+
 // ===== IPC Handlers =====
 
 // Window controls
@@ -278,6 +288,7 @@ ipcMain.handle('cameras:add', (_, camera) => {
   }
 
   store.set('cameras', cameras);
+  reloadAgentIfRunning();
 
   // Sync added camera to Cloud API in background
   (async () => {
@@ -307,6 +318,7 @@ ipcMain.handle('cameras:add', (_, camera) => {
 ipcMain.handle('cameras:remove', async (_, id) => {
   const cameras = store.get('cameras', []).filter(c => c.id !== id);
   store.set('cameras', cameras);
+  reloadAgentIfRunning();
 
   // Sync deletion to Cloud API
   try {
@@ -326,6 +338,7 @@ ipcMain.handle('cameras:toggle', (_, id) => {
   const cam = cameras.find(c => c.id === id);
   if (cam) cam.enabled = !cam.enabled;
   store.set('cameras', cameras);
+  reloadAgentIfRunning();
   return cam;
 });
 ipcMain.handle('cameras:update', (_, id, updates) => {
@@ -338,6 +351,23 @@ ipcMain.handle('cameras:update', (_, id, updates) => {
   if (index !== -1) {
     cameras[index] = { ...cameras[index], ...updates };
     store.set('cameras', cameras);
+  reloadAgentIfRunning();
+
+    // Sync updated camera to cloud API
+    (async () => {
+      try {
+        const serverUrl = store.get('serverUrl');
+        const token = store.get('accessToken');
+        if (serverUrl && token) {
+          const ApiClient = require('./api-client');
+          const client = new ApiClient(serverUrl, token);
+          await client.addCamera(cameras[index]);
+        }
+      } catch (err) {
+        console.warn('[CAMERA_SYNC] Failed to sync updated camera to cloud:', err.message);
+      }
+    })();
+
     return cameras[index];
   }
   throw new Error('الكاميرا غير موجودة');
@@ -367,6 +397,117 @@ ipcMain.handle('cameras:fetchFromServer', async () => {
     return { success: false, error: err.message };
   }
 });
+
+// Bulk sync all local cameras to cloud API
+ipcMain.handle('cameras:syncAllToCloud', async () => {
+  const serverUrl = store.get('serverUrl');
+  const token = store.get('accessToken');
+  if (!serverUrl || !token) {
+    return { success: false, error: 'غير متصل بالخادم أو لم يتم تسجيل الدخول' };
+  }
+
+  const ApiClient = require('./api-client');
+  const client = new ApiClient(serverUrl, token);
+  const localCameras = store.get('cameras', []);
+
+  if (localCameras.length === 0) {
+    return { success: true, count: 0, message: 'لا توجد كاميرات محلية للمزامنة' };
+  }
+
+  let syncedCount = 0;
+  for (const cam of localCameras) {
+    try {
+      const serverCam = await client.addCamera(cam);
+      if (serverCam && serverCam.id && serverCam.id !== cam.id) {
+        cam.id = serverCam.id;
+      }
+      syncedCount++;
+    } catch (err) {
+      console.warn(`[SYNC] Failed to sync camera ${cam.name}:`, err.message);
+    }
+  }
+
+  store.set('cameras', localCameras);
+  reloadAgentIfRunning();
+  return { success: true, count: syncedCount, total: localCameras.length };
+});
+
+// Local HTTP API on port 18800 for Web Dashboard direct sync
+try {
+  const http = require('http');
+  const localServer = http.createServer(async (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      return res.end();
+    }
+
+    if (req.url === '/api/cameras' && req.method === 'GET') {
+      const cams = store.get('cameras', []);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: true, cameras: cams }));
+    }
+
+    if (req.url.startsWith('/api/cameras/snapshot') && req.method === 'GET') {
+      const parsedUrl = new URL(req.url, 'http://127.0.0.1:18800');
+      const camId = parsedUrl.searchParams.get('id');
+      const camIp = parsedUrl.searchParams.get('ip');
+      const cams = store.get('cameras', []);
+      const cam = cams.find(c => (camId && c.id === camId) || (camIp && c.rtspUrl && c.rtspUrl.includes(camIp)));
+      if (cam && cam.rtspUrl) {
+        try {
+          const CameraWorker = require('./camera-worker');
+          const worker = new CameraWorker();
+          const frame = await worker.captureFrame(cam.rtspUrl, 5000);
+          res.writeHead(200, {
+            'Content-Type': 'image/jpeg',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+          });
+          return res.end(frame);
+        } catch (e) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: e.message }));
+        }
+      }
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'Camera not found' }));
+    }
+
+    if (req.url === '/api/sync' && req.method === 'POST') {
+      const serverUrl = store.get('serverUrl');
+      const token = store.get('accessToken');
+      let syncedCount = 0;
+      if (serverUrl && token) {
+        const ApiClient = require('./api-client');
+        const client = new ApiClient(serverUrl, token);
+        const cams = store.get('cameras', []);
+        for (const cam of cams) {
+          try {
+            await client.addCamera(cam);
+            syncedCount++;
+          } catch {}
+        }
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: true, count: syncedCount }));
+    }
+
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Not found' }));
+  });
+
+  localServer.listen(18800, '0.0.0.0', () => {
+    console.log('[AGENT_HTTP] Local API listening on port 18800');
+  });
+  localServer.on('error', (e) => {
+    console.warn('[AGENT_HTTP] Local server info/warning:', e.message);
+  });
+} catch (e) {
+  console.warn('[AGENT_HTTP] Could not start local server:', e.message);
+}
 
 // Auto-scan local network cameras (SADP, ONVIF, RTSP port sweep)
 const CameraScanner = require('./camera-scanner');

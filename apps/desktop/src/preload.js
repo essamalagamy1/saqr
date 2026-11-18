@@ -36,6 +36,7 @@ const saqrBridge = {
     update: (id, updates) => ipcRenderer.invoke('cameras:update', id, updates),
     test: (rtspUrl) => ipcRenderer.invoke('cameras:test', rtspUrl),
     fetchFromServer: () => ipcRenderer.invoke('cameras:fetchFromServer'),
+    syncAllToCloud: () => ipcRenderer.invoke('cameras:syncAllToCloud'),
     scanNetwork: () => ipcRenderer.invoke('cameras:scanNetwork'),
   },
 

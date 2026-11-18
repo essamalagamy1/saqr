@@ -1,4 +1,4 @@
-// Rased Edge Agent — Agent Runner (Orchestrator)
+// Saqr Edge Agent — Agent Runner (Orchestrator)
 const CameraWorker = require('./camera-worker');
 const AIEngine = require('./ai-engine');
 const ApiClient = require('./api-client');
@@ -25,7 +25,7 @@ class AgentRunner {
     this.running = true;
     this.stats.startedAt = new Date();
 
-    console.log('[AGENT] Starting Rased Edge Agent...');
+    console.log('[AGENT] Starting Saqr Edge Agent...');
 
     // Initialize API client
     const serverUrl = this.store.get('serverUrl');
@@ -33,46 +33,81 @@ class AgentRunner {
     this.apiClient = new ApiClient(serverUrl, accessToken);
 
     // Initialize AI engine
-    await this.aiEngine.init();
+    try {
+      await this.aiEngine.init();
+    } catch (err) {
+      console.warn('[AGENT] AI engine init warning:', err.message);
+    }
 
-    // Get cameras
-    const cameras = this.store.get('cameras', []).filter(c => c.enabled);
+    this.reloadCameras();
+  }
+
+  reloadCameras() {
+    if (!this.running) return;
+    console.log('[AGENT] Refreshing active camera workers...');
+    this.cameraWorker.stopAll();
+
+    // Re-check API client in case serverUrl was updated
+    const serverUrl = this.store.get('serverUrl');
+    const accessToken = this.store.get('accessToken');
+    this.apiClient = new ApiClient(serverUrl, accessToken);
+
+    const cameras = this.store.get('cameras', []).filter(c => c.enabled !== false);
     if (cameras.length === 0) {
-      console.log('[AGENT] No enabled cameras. Waiting...');
+      console.log('[AGENT] No enabled cameras found. Waiting for cameras to be added...');
+      return;
     }
 
     const interval = this.store.get('detectionInterval', 3);
+    console.log(`[AGENT] Starting capture for ${cameras.length} camera(s) (interval=${interval}s)...`);
 
-    // Start capture for each camera
+    let delay = 0;
     for (const camera of cameras) {
       if (!camera.rtspUrl) continue;
-      console.log(`[AGENT] Starting capture for: ${camera.name} (${camera.rtspUrl})`);
+      setTimeout(() => {
+        if (!this.running) return;
+        console.log(`[AGENT] 🎥 Activating capture worker for: ${camera.name} (${camera.rtspUrl})`);
+        this.cameraWorker.startCapture(
+          camera.id,
+          camera.rtspUrl,
+          interval,
+          async (cameraId, frame, error) => {
+            if (!this.running) return;
 
-      this.cameraWorker.startCapture(
-        camera.id,
-        camera.rtspUrl,
-        interval,
-        async (cameraId, frame, error) => {
-          if (!this.running) return;
+            if (error) {
+              console.error(`[AGENT] Frame capture error (${camera.name}):`, error.message);
+              this.stats.errors++;
+              return;
+            }
 
-          if (error) {
-            console.error(`[AGENT] Frame capture error (${camera.name}):`, error.message);
-            this.stats.errors++;
-            return;
+            await this._processFrame(camera, frame);
           }
-
-          await this._processFrame(camera, frame);
-        }
-      );
+        );
+      }, delay);
+      delay += 300; // Stagger connection starts to avoid network / CPU spike
     }
-
-    console.log(`[AGENT] Running with ${cameras.length} camera(s), interval=${interval}s`);
   }
 
   async _processFrame(camera, frameBuffer) {
     try {
       this.stats.framesProcessed++;
-      console.log(`[AGENT] 📸 Frame received from: ${camera.name} (${frameBuffer ? frameBuffer.length : 0} bytes)`);
+
+      // Upload live frame to cloud platform so web dashboard live view displays real camera feed
+      if (frameBuffer && frameBuffer.length > 500 && this.apiClient) {
+        let ip = camera.dvrIp;
+        if (!ip && camera.rtspUrl) {
+          const m = camera.rtspUrl.match(/@?([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})/);
+          if (m) ip = m[1];
+        }
+        let ch = camera.channel ? `CH${camera.channel}` : (camera.dvrChannel || '');
+        if (!ch && camera.rtspUrl) {
+          const chMatch = camera.rtspUrl.match(/\/Streaming\/Channels\/(\d+)01/i) || camera.rtspUrl.match(/\/ch(\d+)\//i) || camera.rtspUrl.match(/\/(\d{1,2})01\b/i);
+          if (chMatch) ch = `CH${parseInt(chMatch[1], 10)}`;
+        }
+        if (!ch) ch = 'CH1';
+
+        this.apiClient.uploadCameraFrame(camera.id, ip, ch, frameBuffer).catch(() => {});
+      }
 
       // Run AI detection
       const detections = await this.aiEngine.detect(frameBuffer);
@@ -95,7 +130,7 @@ class AgentRunner {
           metadata: JSON.stringify({
             class: det.label,
             classId: det.classId,
-            source: 'rased-edge-agent',
+            source: 'saqr-edge-agent',
           }),
         };
 

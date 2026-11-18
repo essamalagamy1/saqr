@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Camera, Plus, Video, Trash2, Power, CheckCircle, Clock, RefreshCw, Loader2, AlertCircle, Search, Radio, ShieldCheck } from 'lucide-react';
+import { Camera, Plus, Video, Trash2, Power, CheckCircle, Clock, RefreshCw, Loader2, AlertCircle, Search, Radio, ShieldCheck, Download } from 'lucide-react';
 import { api } from '@/lib/api';
 
 interface CameraItem {
@@ -25,6 +25,7 @@ interface DiscoveredCamera {
   name: string;
   rtspUrl: string;
   needsCredentials: boolean;
+  channel?: number;
 }
 
 interface BranchItem {
@@ -39,6 +40,10 @@ export default function CamerasPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  // Agent Sync States
+  const [syncingAgent, setSyncingAgent] = useState(false);
+  const [syncBanner, setSyncBanner] = useState<{ type: 'success' | 'info' | 'error'; message: string } | null>(null);
 
   // Auto-Scan States
   const [showScanModal, setShowScanModal] = useState(false);
@@ -79,6 +84,67 @@ export default function CamerasPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  const handleSyncFromAgent = async () => {
+    setSyncingAgent(true);
+    setSyncBanner(null);
+
+    // 1. If running on same machine/LAN where Edge Agent is running, try direct pull from local agent port 18800
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1200);
+      const res = await fetch('http://127.0.0.1:18800/api/cameras', {
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const localData = await res.json();
+        if (localData.success && Array.isArray(localData.cameras) && localData.cameras.length > 0) {
+          const branchId = branches[0]?.id || '';
+          for (const c of localData.cameras) {
+            const channelStr = c.channel ? `CH${c.channel}` : (c.dvrChannel || 'CH1');
+            await api.post('/cameras/', {
+              name: c.name,
+              branch_id: branchId,
+              rtsp_url: c.rtspUrl,
+              dvr_ip: c.dvrIp || '',
+              dvr_channel: channelStr,
+              protocol: 'rtsp',
+            }).catch(() => {});
+          }
+        }
+      }
+    } catch {
+      // Local port unreachable or mixed-content: fallback to querying cloud DB directly
+    }
+
+    // 2. Fetch latest cameras from cloud database
+    try {
+      const camsData = await api.get<CameraItem[]>('/cameras/');
+      if (camsData) {
+        setCameras(camsData);
+        if (camsData.length > 0) {
+          setSyncBanner({
+            type: 'success',
+            message: `تم جلب ومزامنة الكاميرات بنجاح! تم رصد ${camsData.length} كاميرا مسجلة وجاهزة للمراقبة.`,
+          });
+        } else {
+          setSyncBanner({
+            type: 'info',
+            message: 'لم يتم العثور على كاميرات مسجلة من التطبيق حتى الآن. تأكد من فتح تطبيق Saqr Edge Agent على جهاز الويندوز وإضافة الكاميرات أو فحصها، ثم الضغط على "مزامنة مع المنصة".',
+          });
+        }
+      }
+    } catch (err: any) {
+      setSyncBanner({
+        type: 'error',
+        message: 'تعذر جلب الكاميرات من الخادم: ' + (err.message || ''),
+      });
+    } finally {
+      setSyncingAgent(false);
+    }
+  };
 
   const handleStartScan = async () => {
     setShowScanModal(true);
@@ -239,6 +305,19 @@ export default function CamerasPage() {
             <RefreshCw className="h-4 w-4" />
           </button>
           <button
+            onClick={handleSyncFromAgent}
+            disabled={syncingAgent}
+            title="جلب ومزامنة الكاميرات المسجلة في تطبيق صقر الميداني (Edge Agent)"
+            className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-700 px-4 py-2 text-xs font-bold text-white hover:from-emerald-500 hover:to-teal-600 transition-all shadow-lg shadow-emerald-600/25 border border-emerald-500/30 disabled:opacity-50"
+          >
+            {syncingAgent ? (
+              <Loader2 className="h-4 w-4 animate-spin text-white" />
+            ) : (
+              <Download className="h-4 w-4 text-emerald-200" />
+            )}
+            <span>{syncingAgent ? 'جاري جلب الكاميرات...' : '📥 جلب كاميرات تطبيق Edge Agent'}</span>
+          </button>
+          <button
             onClick={handleStartScan}
             className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-sky-600 to-sky-700 px-4 py-2 text-xs font-bold text-white hover:from-sky-500 hover:to-sky-600 transition-all shadow-lg shadow-sky-600/25 border border-sky-500/30"
           >
@@ -254,6 +333,33 @@ export default function CamerasPage() {
           </button>
         </div>
       </div>
+
+      {syncBanner && (
+        <div
+          className={`flex items-center justify-between gap-2 rounded-lg border p-3 text-xs transition-all ${
+            syncBanner.type === 'success'
+              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+              : syncBanner.type === 'error'
+              ? 'border-red-500/30 bg-red-500/10 text-red-400'
+              : 'border-sky-500/30 bg-sky-500/10 text-sky-400'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {syncBanner.type === 'success' ? (
+              <CheckCircle className="h-4 w-4 shrink-0 text-emerald-400" />
+            ) : (
+              <AlertCircle className="h-4 w-4 shrink-0" />
+            )}
+            <span>{syncBanner.message}</span>
+          </div>
+          <button
+            onClick={() => setSyncBanner(null)}
+            className="text-slate-400 hover:text-white px-1 font-bold"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-400">
@@ -287,14 +393,28 @@ export default function CamerasPage() {
               ) : cameras.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-slate-500">
-                    <p className="mb-3">لم يتم تسجيل أي كاميرا حتى الآن.</p>
-                    <button
-                      onClick={handleStartScan}
-                      className="inline-flex items-center gap-2 rounded-lg bg-sky-600/90 px-4 py-2 text-xs font-bold text-white hover:bg-sky-500 transition-colors shadow-lg shadow-sky-600/20"
-                    >
-                      <Search className="h-4 w-4" />
-                      <span>🔍 فحص واكتشاف كاميرات الشبكة الآن</span>
-                    </button>
+                    <p className="mb-4 text-sm text-slate-400">لم يتم تسجيل أي كاميرا حتى الآن في قاعدة البيانات.</p>
+                    <div className="flex flex-wrap items-center justify-center gap-3">
+                      <button
+                        onClick={handleSyncFromAgent}
+                        disabled={syncingAgent}
+                        className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-500 transition-colors shadow-lg shadow-emerald-600/20 disabled:opacity-50"
+                      >
+                        {syncingAgent ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Download className="h-4 w-4" />
+                        )}
+                        <span>📥 جلب كاميرات تطبيق Edge Agent</span>
+                      </button>
+                      <button
+                        onClick={handleStartScan}
+                        className="inline-flex items-center gap-2 rounded-lg bg-sky-600/90 px-4 py-2 text-xs font-bold text-white hover:bg-sky-500 transition-colors shadow-lg shadow-sky-600/20"
+                      >
+                        <Search className="h-4 w-4" />
+                        <span>🔍 فحص واكتشاف كاميرات الشبكة الآن</span>
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ) : (

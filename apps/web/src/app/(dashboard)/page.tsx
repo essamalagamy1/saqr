@@ -18,7 +18,8 @@ import {
   ChevronLeft,
   X,
   Check,
-  BellRing
+  BellRing,
+  Video
 } from 'lucide-react';
 import { api } from '@/lib/api';
 
@@ -39,6 +40,14 @@ export default function DashboardPage() {
     return `اليوم (${new Date().toLocaleDateString('ar-EG', { day: 'numeric', month: 'long', year: 'numeric' })})`;
   });
   const [notificationEnabled, setNotificationEnabled] = useState(false);
+  const [frameTick, setFrameTick] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setFrameTick(Date.now());
+    }, 2500);
+    return () => clearInterval(timer);
+  }, []);
 
   const fetchLiveStats = async () => {
     try {
@@ -48,23 +57,27 @@ export default function DashboardPage() {
         api.get<any[]>('/cameras/').catch(() => []),
       ]);
 
-      if (statsData) {
-        setStats({
-          active_cameras: statsData.active_cameras ?? (Array.isArray(camsData) ? camsData.length : 0),
-          active_services: statsData.active_services ?? 0,
-          total_detections: statsData.total_detections ?? 0,
-          unread_detections: statsData.unread_detections ?? 0,
-        });
-        setIsLiveApi(true);
-      }
+      const cams = Array.isArray(camsData) ? camsData : [];
+      const activeCams = cams.filter((c: any) => c.status === 'active' || c.status === 'online');
+      const activeCount = activeCams.length;
 
-      if (detData && Array.isArray(detData)) {
-        setRecentDetections(detData.slice(0, 4));
-      }
+      // Filter recent detections to strictly include detections from existing cameras
+      const existingCamIds = new Set(cams.map((c: any) => c.id));
+      const validDetections = Array.isArray(detData)
+        ? detData.filter((d: any) => !d.camera_id || existingCamIds.has(d.camera_id))
+        : [];
 
-      if (camsData && Array.isArray(camsData)) {
-        setLiveCameras(camsData);
-      }
+      setStats({
+        active_cameras: activeCount,
+        // AI services are only running if there are active camera feeds to monitor
+        active_services: activeCount > 0 ? (statsData?.active_services ?? 6) : 0,
+        total_detections: activeCount > 0 ? (statsData?.total_detections ?? validDetections.length) : 0,
+        unread_detections: activeCount > 0 ? (statsData?.unread_detections ?? 0) : 0,
+      });
+      setIsLiveApi(true);
+
+      setRecentDetections(activeCount > 0 ? validDetections.slice(0, 4) : []);
+      setLiveCameras(cams);
     } catch (e) {
       console.error('Error fetching live stats:', e);
     }
@@ -154,9 +167,15 @@ export default function DashboardPage() {
           <div className="mt-2 text-2xl font-bold text-white tracking-tight">
             {stats.active_cameras} <span className="text-xs font-normal text-slate-400">كاميرات</span>
           </div>
-          <div className="mt-2 flex items-center gap-1.5 text-[11px] text-emerald-400">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span>قيد المعالجة عبر Edge Agent</span>
+          <div className="mt-2 flex items-center gap-1.5 text-[11px]">
+            {stats.active_cameras > 0 ? (
+              <>
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-emerald-400">قيد المعالجة عبر Edge Agent</span>
+              </>
+            ) : (
+              <span className="text-slate-500">لا توجد كاميرات متصلة</span>
+            )}
           </div>
         </Link>
 
@@ -170,7 +189,7 @@ export default function DashboardPage() {
             {stats.active_services} <span className="text-xs font-normal text-slate-400">خدمات</span>
           </div>
           <div className="mt-2 text-[11px] text-slate-400">
-            موزعة على قنوات المراقبة
+            {stats.active_cameras > 0 ? `موزعة على ${stats.active_cameras} قنوات مراقبة` : 'بانتظار ربط الكاميرات لتفعيل الرصد'}
           </div>
         </Link>
 
@@ -184,7 +203,7 @@ export default function DashboardPage() {
             {stats.total_detections} <span className="text-xs font-normal text-slate-400">حدث</span>
           </div>
           <div className="mt-2 text-[11px] text-amber-400">
-            تحديث لحظي من الكاميرات
+            {stats.active_cameras > 0 ? 'تحديث لحظي من الكاميرات' : 'لا توجد كاميرات للرصد'}
           </div>
         </Link>
 
@@ -197,8 +216,8 @@ export default function DashboardPage() {
           <div className="mt-2 text-2xl font-bold text-white tracking-tight">
             {stats.unread_detections} <span className="text-xs font-normal text-slate-400">تحتاج اعتماد</span>
           </div>
-          <div className="mt-2 text-[11px] text-red-400">
-            تتطلب متابعة ميدانية
+          <div className="mt-2 text-[11px] text-slate-400">
+            {stats.active_cameras > 0 ? 'تتطلب متابعة ميدانية' : 'لا توجد تنبيهات'}
           </div>
         </Link>
       </div>
@@ -233,28 +252,41 @@ export default function DashboardPage() {
             </Link>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {liveCameras.slice(0, 4).map((cam) => (
-              <div key={cam.id} className="overflow-hidden rounded-lg border border-slate-800 bg-[#070b14] flex flex-col justify-between">
-                <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800/80 bg-slate-900/60 text-xs">
-                  <span className="font-semibold text-slate-200 truncate">{cam.name}</span>
-                  <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
-                    cam.status === 'active' || cam.status === 'online'
-                      ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
-                      : 'text-slate-400 bg-slate-800 border-slate-700'
-                  }`}>
-                    {cam.dvr_channel || 'CH1'} • {cam.status === 'active' ? 'LIVE' : 'متصل'}
-                  </span>
-                </div>
-                <div className="relative aspect-video w-full flex flex-col items-center justify-center p-4 text-center bg-slate-950/60">
-                  <Video className="h-7 w-7 text-amber-500/60 mb-2" />
-                  <div className="text-xs font-semibold text-slate-300 truncate max-w-[90%]">{cam.name}</div>
-                  <div className="text-[10px] text-slate-500 font-mono mt-1" dir="ltr">
-                    {cam.dvr_ip ? `${cam.dvr_ip}:554` : 'RTSP Stream'}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {liveCameras.slice(0, 4).map((cam) => {
+              const ip = cam.dvr_ip || '192.168.8.72';
+              const ch = cam.dvr_channel || 'CH1';
+              return (
+                <Link
+                  key={cam.id}
+                  href="/live"
+                  className="group overflow-hidden rounded-lg border border-slate-800 bg-[#070b14] flex flex-col justify-between hover:border-amber-500/50 transition shadow"
+                >
+                  <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800/80 bg-slate-900/60 text-xs">
+                    <span className="font-semibold text-slate-200 truncate">{cam.name}</span>
+                    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                      cam.status === 'active' || cam.status === 'online'
+                        ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                        : 'text-slate-400 bg-slate-800 border-slate-700'
+                    }`}>
+                      {ch} • LIVE
+                    </span>
                   </div>
-                </div>
-              </div>
-            ))}
+                  <div className="relative aspect-video w-full flex items-center justify-center overflow-hidden bg-black">
+                    <img
+                      src={`/api/cameras/${cam.id}/frame?ip=${encodeURIComponent(ip)}&ch=${encodeURIComponent(ch)}&t=${frameTick}`}
+                      alt={cam.name}
+                      className="w-full h-full object-cover select-none"
+                      loading="lazy"
+                    />
+                    <div className="absolute top-2 right-2 text-[9px] font-mono text-emerald-400 bg-black/85 px-1.5 py-0.5 rounded border border-emerald-500/30 flex items-center gap-1 shadow pointer-events-none">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" />
+                      LIVE
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         )}
       </div>

@@ -34,10 +34,11 @@ export function Sidebar() {
       api.get<any>('/detections/stats').catch(() => null),
       api.get<any[]>('/tasks/').catch(() => []),
     ]).then(([services, cams, stats, tasks]) => {
+      const activeCamsCount = Array.isArray(cams) ? cams.filter((c: any) => c.status === 'active' || c.status === 'online').length : 0;
       setCounts({
-        aiServices: Array.isArray(services) ? services.filter((s: any) => s.is_active || s.status === 'active').length : 0,
-        cameras: Array.isArray(cams) ? cams.filter((c: any) => c.status === 'active' || c.status === 'online').length : 0,
-        detections: stats?.unread_detections ?? 0,
+        aiServices: activeCamsCount > 0 && Array.isArray(services) ? services.filter((s: any) => s.is_active || s.status === 'active').length : 0,
+        cameras: activeCamsCount,
+        detections: activeCamsCount > 0 ? (stats?.unread_detections ?? 0) : 0,
         tasks: Array.isArray(tasks) ? tasks.filter((t: any) => t.status !== 'completed').length : 0,
       });
     });
