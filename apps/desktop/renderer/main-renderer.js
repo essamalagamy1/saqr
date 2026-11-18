@@ -53,6 +53,18 @@ function setAgentUI(running) {
     statusDot.className = 'status-dot offline';
     statusText.textContent = 'المراقبة متوقفة';
   }
+
+  const emptyTitle = document.getElementById('feedEmptyTitle');
+  const emptyHint = document.getElementById('feedEmptyHint');
+  if (emptyTitle && emptyHint) {
+    if (running) {
+      emptyTitle.textContent = 'المراقبة نشطة وتعمل الآن';
+      emptyHint.textContent = 'جاري سحب إطارات الكاميرات وتحليلها لحظياً... لا توجد مخالفات حالياً';
+    } else {
+      emptyTitle.textContent = 'المراقبة متوقفة مؤقتاً';
+      emptyHint.textContent = 'اضغط على زر "تشغيل المراقبة" بالأعلى لبدء الرصد والتحليل';
+    }
+  }
 }
 
 // ===== Cameras =====
@@ -322,8 +334,16 @@ async function toggleCamera(id) {
 }
 
 async function testCameraConnection() {
-  const rtspUrl = document.getElementById('cameraRtsp').value.trim();
+  let rtspUrl = document.getElementById('cameraRtsp').value.trim();
   if (!rtspUrl) { alert('يرجى كتابة عنوان RTSP أولاً'); return; }
+
+  // Inject credentials from the form fields if not already in the URL
+  const addUser = document.getElementById('cameraAddUser').value.trim();
+  const addPass = document.getElementById('cameraAddPass').value.trim();
+  if (addPass && !rtspUrl.includes('@')) {
+    let host = rtspUrl.startsWith('rtsp://') ? rtspUrl.substring(7) : rtspUrl;
+    rtspUrl = `rtsp://${encodeURIComponent(addUser || 'admin')}:${encodeURIComponent(addPass)}@${host}`;
+  }
 
   const resultDiv = document.getElementById('cameraTestResult');
   resultDiv.style.display = 'block';
@@ -333,7 +353,18 @@ async function testCameraConnection() {
   const result = await rased.cameras.test(rtspUrl);
   if (result.success) {
     resultDiv.className = 'test-result success';
-    resultDiv.textContent = `تم الاتصال بنجاح (زمن الاستجابة: ${result.data.latencyMs}ms | حجم الإطار: ${Math.round(result.data.frameSize / 1024)}KB)`;
+    resultDiv.textContent = `تم الاتصال بنجاح! كلمة المرور ومسار البث صالحين (الاستجابة: ${result.data.latencyMs}ms)`;
+    // Auto-fill the working path back into the URL field
+    if (result.data.workingUrl) {
+      const m = result.data.workingUrl.match(/^rtsp[s]?:\/\/[^\/]+(\/.*)/i);
+      if (m) {
+        const ipMatch = rtspUrl.match(/@?([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}:[0-9]+)/);
+        const portHost = ipMatch ? ipMatch[1] : document.getElementById('cameraRtsp').value.match(/([0-9.]+:[0-9]+)/)?.[1] || '';
+        if (portHost) {
+          document.getElementById('cameraRtsp').value = `rtsp://${portHost}${m[1]}`;
+        }
+      }
+    }
   } else {
     resultDiv.className = 'test-result error';
     resultDiv.textContent = `فشل الاتصال بالكاميرا: ${result.error}`;
