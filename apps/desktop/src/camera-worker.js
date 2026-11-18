@@ -4,11 +4,103 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 
-let ffmpegPath;
-try {
-  ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
-} catch {
-  ffmpegPath = 'ffmpeg'; // fallback to system ffmpeg
+/**
+ * Resolves the absolute path to the bundled or system FFmpeg binary.
+ * Handles packaged Electron (.asar / asar.unpacked / extraResources / AppData fallback).
+ */
+function resolveFfmpegPath() {
+  const isWin = process.platform === 'win32';
+  const binaryName = isWin ? 'ffmpeg.exe' : 'ffmpeg';
+
+  // 1. Packaged Electron extraResources (e.g. resources/bin/ffmpeg.exe)
+  if (process.resourcesPath) {
+    const directBin = path.join(process.resourcesPath, 'bin', binaryName);
+    if (fs.existsSync(directBin)) return directBin;
+
+    const rootBin = path.join(process.resourcesPath, binaryName);
+    if (fs.existsSync(rootBin)) return rootBin;
+
+    // Check asar.unpacked
+    const unpacked = path.join(
+      process.resourcesPath,
+      'app.asar.unpacked',
+      'node_modules',
+      '@ffmpeg-installer',
+      `${process.platform}-${process.arch}`,
+      binaryName
+    );
+    if (fs.existsSync(unpacked)) return unpacked;
+
+    if (isWin) {
+      const unpackedWin = path.join(
+        process.resourcesPath,
+        'app.asar.unpacked',
+        'node_modules',
+        '@ffmpeg-installer',
+        'win32-x64',
+        'ffmpeg.exe'
+      );
+      if (fs.existsSync(unpackedWin)) return unpackedWin;
+    }
+  }
+
+  // 2. Check userData/bin/ffmpeg.exe (extracted for in-app updates)
+  let userDataBin = null;
+  try {
+    const electron = require('electron');
+    const electronApp = electron.app || (electron.remote && electron.remote.app);
+    if (electronApp && typeof electronApp.getPath === 'function') {
+      const userData = electronApp.getPath('userData');
+      userDataBin = path.join(userData, 'bin', binaryName);
+      if (fs.existsSync(userDataBin) && fs.statSync(userDataBin).size > 5 * 1024 * 1024) {
+        return userDataBin;
+      }
+    }
+  } catch {}
+
+  // 3. Try to unpack from bundled asset into userData/bin if on Windows
+  if (isWin && userDataBin) {
+    const possibleBundled = [
+      path.join(__dirname, '..', 'assets', 'bin', 'ffmpeg.exe'),
+      path.join(__dirname, '..', 'node_modules', '@ffmpeg-installer', 'win32-x64', 'ffmpeg.exe')
+    ];
+    for (const src of possibleBundled) {
+      try {
+        if (fs.existsSync(src)) {
+          const binDir = path.dirname(userDataBin);
+          if (!fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
+          const buf = fs.readFileSync(src);
+          fs.writeFileSync(userDataBin, buf);
+          return userDataBin;
+        }
+      } catch (err) {
+        console.error('Failed to unpack ffmpeg to userData:', err);
+      }
+    }
+  }
+
+  // 4. Try @ffmpeg-installer/ffmpeg
+  try {
+    let p = require('@ffmpeg-installer/ffmpeg').path;
+    if (p) {
+      const unpackedP = p.replace('app.asar', 'app.asar.unpacked');
+      if (fs.existsSync(unpackedP)) return unpackedP;
+      if (fs.existsSync(p)) return p;
+    }
+  } catch {}
+
+  // 5. Check relative paths from project root
+  const candidates = [
+    path.resolve(__dirname, '..', 'assets', 'bin', binaryName),
+    path.resolve(__dirname, '..', 'node_modules', '@ffmpeg-installer', `${process.platform}-${process.arch}`, binaryName),
+    path.resolve(__dirname, '..', 'node_modules', '@ffmpeg-installer', 'win32-x64', 'ffmpeg.exe')
+  ];
+  for (const cand of candidates) {
+    if (fs.existsSync(cand)) return cand;
+  }
+
+  // 6. Fallback to system command
+  return binaryName;
 }
 
 class CameraWorker {
@@ -26,6 +118,7 @@ class CameraWorker {
    */
   captureFrame(rtspUrl, timeoutMs = 10000) {
     return new Promise((resolve, reject) => {
+      const ffmpegExe = resolveFfmpegPath();
       const args = [
         '-rtsp_transport', 'tcp',
         '-analyzeduration', '1000000',
@@ -38,9 +131,14 @@ class CameraWorker {
         'pipe:1'
       ];
 
-      const proc = spawn(ffmpegPath, args, {
-        stdio: ['ignore', 'pipe', 'pipe']
-      });
+      let proc;
+      try {
+        proc = spawn(ffmpegExe, args, {
+          stdio: ['ignore', 'pipe', 'pipe']
+        });
+      } catch (spawnErr) {
+        return reject(new Error(`تعذر تشغيل محرك الفيديو FFmpeg (${ffmpegExe}): ${spawnErr.message}`));
+      }
 
       const chunks = [];
       let stderr = '';
@@ -49,8 +147,8 @@ class CameraWorker {
       proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
 
       const timer = setTimeout(() => {
-        proc.kill('SIGKILL');
-        reject(new Error('Frame capture timeout'));
+        try { proc.kill('SIGKILL'); } catch {}
+        reject(new Error('انتهت مهلة قراءة إطار الفيديو من الكاميرا (Frame capture timeout)'));
       }, timeoutMs);
 
       proc.on('close', (code) => {
@@ -58,13 +156,17 @@ class CameraWorker {
         if (code === 0 && chunks.length > 0) {
           resolve(Buffer.concat(chunks));
         } else {
-          reject(new Error(`ffmpeg exited with code ${code}: ${stderr.slice(-200)}`));
+          reject(new Error(`توقف محرك الفيديو بكود (${code}): ${stderr.slice(-200)}`));
         }
       });
 
       proc.on('error', (err) => {
         clearTimeout(timer);
-        reject(err);
+        if (err.code === 'ENOENT') {
+          reject(new Error(`لم يتم العثور على محرك تشغيل الفيديو FFmpeg في المسار (${ffmpegExe})`));
+        } else {
+          reject(err);
+        }
       });
     });
   }
