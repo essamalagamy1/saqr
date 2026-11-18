@@ -34,12 +34,28 @@
       "output": "dist",
       "buildResources": "assets"
     },
+    "compression": "maximum",
     "files": [
       "src/**/*",
       "renderer/**/*",
       "assets/**/*",
       "models/**/*",
       "node_modules/**/*",
+      "!node_modules/**/test/**",
+      "!node_modules/**/tests/**",
+      "!node_modules/**/docs/**",
+      "!node_modules/**/*.md",
+      "!node_modules/**/*.map",
+      "!node_modules/onnxruntime-node/bin/napi-v6/darwin/**",
+      "!node_modules/onnxruntime-node/bin/napi-v6/linux/**",
+      "!node_modules/onnxruntime-node/bin/napi-v6/win32/arm64/**",
+      "!node_modules/onnxruntime-node/bin/napi-v6/win32/ia32/**",
+      "!node_modules/@ffmpeg-installer/linux*/**",
+      "!node_modules/@ffmpeg-installer/darwin*/**",
+      "!node_modules/@img/sharp-linux*/**",
+      "!node_modules/@img/sharp-darwin*/**",
+      "!node_modules/@img/sharp-libvips-linux*/**",
+      "!node_modules/@img/sharp-libvips-darwin*/**",
       "package.json"
     ],
     "extraResources": [
@@ -52,23 +68,11 @@
     "win": {
       "target": [
         {
-          "target": "portable",
-          "arch": ["x64"]
-        },
-        {
-          "target": "nsis",
+          "target": "zip",
           "arch": ["x64"]
         }
       ],
       "icon": "assets/icon.png"
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "Rased Edge Agent"
     }
   }
 }
