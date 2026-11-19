@@ -35,6 +35,8 @@ interface DetectionItem {
   detected_at?: string;
   severity: 'high' | 'medium' | 'low';
   is_acknowledged?: boolean;
+  snapshot_url?: string;
+  bounding_boxes?: string;
 }
 
 function DetectionsContent() {
@@ -255,10 +257,22 @@ function DetectionsContent() {
                   {/* Snapshot Image Container with Bounding Boxes */}
                   <div 
                     onClick={() => setInspectModalItem(item)}
-                    className="relative aspect-video w-full bg-[#070b14] overflow-hidden cursor-pointer"
+                    className="relative aspect-video w-full bg-[#070b14] overflow-hidden cursor-pointer flex items-center justify-center"
                   >
+                    {item.snapshot_url ? (
+                      <img
+                        src={item.snapshot_url}
+                        alt={item.type}
+                        className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-slate-900/60">
+                        <Camera className="h-10 w-10 text-slate-700" />
+                      </div>
+                    )}
+
                     <div
-                      className="absolute inset-8 rounded border-2 border-dashed flex items-start justify-start p-1 transition group-hover:scale-[1.02]"
+                      className="absolute inset-6 rounded border-2 border-dashed flex items-start justify-start p-1 transition group-hover:scale-[1.02] pointer-events-none"
                       style={{ borderColor: color, backgroundColor: `${color}15` }}
                     >
                       <span
@@ -360,18 +374,26 @@ function DetectionsContent() {
             </div>
 
             <div className="relative mt-4 aspect-video w-full bg-black rounded-xl overflow-hidden flex items-center justify-center border border-slate-800">
+              {inspectModalItem.snapshot_url ? (
+                <img
+                  src={inspectModalItem.snapshot_url}
+                  alt={inspectModalItem.type}
+                  className="w-full h-full object-contain"
+                />
+              ) : (
+                <Camera className="h-16 w-16 text-slate-800" />
+              )}
               <div 
-                className="absolute inset-12 rounded border-2 border-dashed flex items-start p-2"
+                className="absolute inset-10 rounded border-2 border-dashed flex items-start p-2 pointer-events-none"
                 style={{ 
                   borderColor: getColor(inspectModalItem.type, inspectModalItem.severity), 
                   backgroundColor: `${getColor(inspectModalItem.type, inspectModalItem.severity)}20` 
                 }}
               >
-                <span className="bg-red-600 text-white font-bold text-xs px-2 py-0.5 rounded">
+                <span className="bg-red-600 text-white font-bold text-xs px-2 py-0.5 rounded shadow">
                   {inspectModalItem.type} ({Math.round(inspectModalItem.confidence * 100)}%)
                 </span>
               </div>
-              <Camera className="h-16 w-16 text-slate-800" />
             </div>
 
             <div className="mt-4 flex items-center justify-between text-xs text-slate-400">
