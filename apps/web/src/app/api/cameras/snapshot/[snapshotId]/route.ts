@@ -17,7 +17,7 @@ export async function GET(
 
   const snap = store?.get(snapshotId);
 
-  if (!snap || snap.buffer.length < 500) {
+  if (!snap || snap.buffer.length < 8000) {
     return new NextResponse(null, { status: 404 });
   }
 

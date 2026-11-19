@@ -23,7 +23,7 @@ export async function GET(
   }
 
   // 1. If we have a live frame from Edge Agent
-  if (frameData && frameData.buffer && frameData.buffer.length > 500) {
+  if (frameData && frameData.buffer && frameData.buffer.length > 8000) {
     return new NextResponse(new Uint8Array(frameData.buffer), {
       status: 200,
       headers: {

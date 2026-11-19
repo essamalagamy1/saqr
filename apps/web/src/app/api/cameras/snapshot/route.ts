@@ -23,9 +23,9 @@ const MAX_SNAPSHOTS = 500; // keep last 500 detection snapshots in memory
 export async function POST(req: NextRequest) {
   try {
     const arrayBuffer = await req.arrayBuffer();
-    if (!arrayBuffer || arrayBuffer.byteLength < 500) {
+    if (!arrayBuffer || arrayBuffer.byteLength < 8000) {
       return NextResponse.json(
-        { success: false, error: 'Empty or invalid snapshot' },
+        { success: false, error: 'Empty or invalid snapshot (min 8KB required)' },
         { status: 400 }
       );
     }

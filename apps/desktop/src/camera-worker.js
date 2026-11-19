@@ -4,6 +4,30 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 
+let sharpInstance = null;
+try {
+  sharpInstance = require('sharp');
+} catch {}
+
+/**
+ * Validates that a JPEG frame is not a corrupted solid-gray decode artifact.
+ * When FFmpeg decodes an RTSP frame without reference, missing macroblocks default to Y=128 (gray).
+ * In such corrupted frames, mean is ~128 and standard deviation is very low (< 9.0) across all channels.
+ */
+async function isCorruptedOrGrayFrame(buffer) {
+  if (!buffer || buffer.length < 5000) return true;
+  if (!sharpInstance) return false;
+  try {
+    const stats = await sharpInstance(buffer).stats();
+    const channels = stats.channels;
+    if (!channels || channels.length < 3) return false;
+    const isSolidGray = channels.every(c => Math.abs(c.mean - 128) < 12 && c.stdev < 9.0);
+    return isSolidGray;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Resolves the absolute path to the bundled or system FFmpeg binary.
  * Handles packaged Electron (.asar / asar.unpacked / extraResources / AppData fallback).
@@ -113,26 +137,41 @@ class CameraWorker {
   }
 
   /**
-   * Capture a single frame from an RTSP stream.
-   * Returns the frame as a Buffer (JPEG).
+   * Capture a single frame from an RTSP stream using FFmpeg.
+   * Guaranteed to avoid gray / incomplete frames by syncing to complete I-frames.
+   * @param {string} rtspUrl
+   * @param {number} timeoutMs
+   * @param {boolean} useStreamDelay - if true, decodes 1s of stream before capturing to ensure keyframe sync
    */
-  captureFrame(rtspUrl, timeoutMs = 10000) {
+  captureFrame(rtspUrl, timeoutMs = 12000, useStreamDelay = false) {
     return new Promise((resolve, reject) => {
       const ffmpegExe = resolveFfmpegPath();
       const args = [
+        // 1. Force reliable TCP transport
         '-rtsp_transport', 'tcp',
-        '-fflags', '+discardcorrupt+nobuffer',
-        '-flags', 'low_delay',
-        '-skip_frame', 'nokey',
-        '-analyzeduration', '2000000',
-        '-probesize', '2000000',
+        // 2. Discard corrupted network packets
+        '-fflags', '+discardcorrupt',
+        // 3. Generous buffer to handle 4K / high-bitrate cameras
+        '-analyzeduration', '4000000',
+        '-probesize', '8000000',
         '-i', rtspUrl,
+      ];
+
+      // If retry or requested: skip first 1s of stream to guarantee keyframe arrival
+      if (useStreamDelay) {
+        args.push('-ss', '00:00:01');
+      }
+
+      // Filter: select only complete I-frames (keyframes) and limit max resolution to 1080p
+      args.push(
+        '-vf', "select='eq(pict_type\\,I)',scale='min(1920,iw)':-2",
         '-frames:v', '1',
+        '-vsync', 'vfr',
         '-q:v', '2',
         '-f', 'image2pipe',
         '-vcodec', 'mjpeg',
         'pipe:1'
-      ];
+      );
 
       let proc;
       try {
@@ -158,10 +197,11 @@ class CameraWorker {
         clearTimeout(timer);
         if (code === 0 && chunks.length > 0) {
           const buffer = Buffer.concat(chunks);
-          if (buffer.length > 3000) {
+          // Require at least 8KB to ensure we have a valid JPEG structure
+          if (buffer.length > 8000) {
             resolve(buffer);
           } else {
-            reject(new Error('إطار غير مكتمل أو تالف (Corrupted / incomplete frame)'));
+            reject(new Error(`إطار غير مكتمل أو تالف — حجم صغير جداً (${buffer.length} bytes)`));
           }
         } else {
           reject(new Error(`توقف محرك الفيديو بكود (${code}): ${stderr.slice(-200)}`));
@@ -177,6 +217,32 @@ class CameraWorker {
         }
       });
     });
+  }
+
+  /**
+   * Captures a frame and verifies it is not a corrupted solid-gray frame.
+   * Automatically retries with stream delay if a gray frame is detected.
+   */
+  async captureFrameWithValidation(rtspUrl, timeoutMs = 12000) {
+    // Attempt 1: Fast keyframe capture
+    try {
+      const frame = await this.captureFrame(rtspUrl, timeoutMs, false);
+      const isGray = await isCorruptedOrGrayFrame(frame);
+      if (!isGray) {
+        return frame;
+      }
+      console.warn('[CAMERA] Detected gray/corrupted frame from stream. Retrying with keyframe synchronization...');
+    } catch (err) {
+      console.warn('[CAMERA] Fast capture attempt failed:', err.message);
+    }
+
+    // Attempt 2: Synchronized capture with 1s stream buffer to lock onto keyframe
+    const retryFrame = await this.captureFrame(rtspUrl, timeoutMs + 3000, true);
+    const isGray2 = await isCorruptedOrGrayFrame(retryFrame);
+    if (isGray2) {
+      throw new Error('تم استلام إطار رمادي غير مكتمل من الكاميرا (Corrupted gray frame rejected)');
+    }
+    return retryFrame;
   }
 
   /**
@@ -223,7 +289,7 @@ class CameraWorker {
     for (const p of uniquePaths) {
       const candidateUrl = baseOrigin + p;
       try {
-        const frameBuffer = await this.captureFrame(candidateUrl, 4500);
+        const frameBuffer = await this.captureFrameWithValidation(candidateUrl, 12000);
         const latency = Date.now() - startTime;
         return {
           connected: true,
@@ -281,7 +347,7 @@ class CameraWorker {
 
     const captureLoop = async () => {
       try {
-        const frame = await this.captureFrame(rtspUrl);
+        const frame = await this.captureFrameWithValidation(rtspUrl);
         onFrame(cameraId, frame);
       } catch (err) {
         onFrame(cameraId, null, err);

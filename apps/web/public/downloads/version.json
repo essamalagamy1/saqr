@@ -1,5 +1,5 @@
 {
-  "version": "1.3.4",
+  "version": "1.3.5",
   "name": "Saqr Edge Agent",
   "releaseDate": "2026-11-19",
   "asarUrl": "/downloads/app.asar",
@@ -9,5 +9,5 @@
     "تصفية الإطارات التالفة من FFmpeg ومنع الإطارات الرمادية غير المكتملة عبر التحقق من Keyframes (I-frames)",
     "استقرار تدفق الفيديو بدقة HD كاملة في شبكة الكاميرات وشاشة التكبير"
   ],
-  "releaseNotes": "Fix: Detection snapshots now show real camera frames instead of placeholder images"
+  "releaseNotes": "Fix: Eliminate gray and incomplete frames via keyframe synchronization and statistical image validation; add auto-retry for corrupted RTSP decodes"
 }
