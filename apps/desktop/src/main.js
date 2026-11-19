@@ -461,6 +461,29 @@ ipcMain.handle('cameras:fetchFromServer', async () => {
   }
 });
 
+// Fetch branches from cloud API
+ipcMain.handle('branches:list', async () => {
+  const ApiClient = require('./api-client');
+  const client = new ApiClient(store.get('serverUrl'), store.get('accessToken'));
+  try {
+    const branches = await client.getBranches();
+    return { success: true, data: branches };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// Connect directly to DVR / NVR and extract all channels & metadata
+ipcMain.handle('dvr:connect-and-fetch', async (_, config) => {
+  const dvrConnector = require('./dvr-connector');
+  try {
+    const result = await dvrConnector.extractDvrChannels(config || {});
+    return { success: true, ...result };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 // Bulk sync all local cameras to cloud API
 ipcMain.handle('cameras:syncAllToCloud', async () => {
   const serverUrl = store.get('serverUrl');

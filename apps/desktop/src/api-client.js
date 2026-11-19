@@ -89,6 +89,15 @@ class ApiClient {
     return data.data || [];
   }
 
+  async getBranches() {
+    const res = await fetch(`${this.baseUrl}/branches/`, {
+      headers: this.headers,
+    });
+    if (!res.ok) throw new Error(`Failed to fetch branches (${res.status})`);
+    const data = await res.json();
+    return data.data || [];
+  }
+
   async addCamera(camera) {
     let dvrIp = camera.dvrIp || '';
     let dvrChannel = camera.channel ? `CH${camera.channel}` : (camera.dvrChannel || 'CH1');

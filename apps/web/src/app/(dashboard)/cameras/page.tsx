@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Camera, Plus, Video, Trash2, Power, CheckCircle, Clock, RefreshCw, Loader2, AlertCircle, Search, Radio, ShieldCheck, Download } from 'lucide-react';
+import { Camera, Plus, Video, Trash2, Power, CheckCircle, Clock, RefreshCw, Loader2, AlertCircle, Search, Radio, ShieldCheck, Download, Building2 } from 'lucide-react';
 import { api } from '@/lib/api';
 
 interface CameraItem {
@@ -33,6 +33,19 @@ interface BranchItem {
   name: string;
 }
 
+interface DvrChannelItem {
+  channelNumber: number;
+  name: string;
+  status: string;
+  resolution?: string;
+  mainRtspUrl: string;
+  subRtspUrl: string;
+  dvrIp: string;
+  dvrChannel: string;
+  brand: string;
+  selected?: boolean;
+}
+
 export default function CamerasPage() {
   const [cameras, setCameras] = useState<CameraItem[]>([]);
   const [branches, setBranches] = useState<BranchItem[]>([]);
@@ -51,6 +64,26 @@ export default function CamerasPage() {
   const [discoveredCameras, setDiscoveredCameras] = useState<DiscoveredCamera[]>([]);
   const [addingIdx, setAddingIdx] = useState<Record<number, boolean>>({});
   const [scanMessage, setScanMessage] = useState('');
+  const [selectedScanBranchId, setSelectedScanBranchId] = useState('');
+
+  // Direct DVR / NVR Connect States
+  const [showDvrModal, setShowDvrModal] = useState(false);
+  const [dvrConnecting, setDvrConnecting] = useState(false);
+  const [dvrImporting, setDvrImporting] = useState(false);
+  const [dvrError, setDvrError] = useState('');
+  const [dvrSuccess, setDvrSuccess] = useState('');
+  const [dvrDeviceInfo, setDvrDeviceInfo] = useState<{ model?: string; totalChannels?: number } | null>(null);
+  const [dvrChannels, setDvrChannels] = useState<DvrChannelItem[]>([]);
+  const [dvrForm, setDvrForm] = useState({
+    ip: '192.168.8.234',
+    port: 80,
+    rtspPort: 554,
+    username: 'admin',
+    password: '',
+    brand: 'hikvision',
+    branch_id: '',
+    maxChannels: 16,
+  });
 
   const [newCamera, setNewCamera] = useState({
     name: '',
@@ -72,6 +105,8 @@ export default function CamerasPage() {
       if (branchesData && branchesData.length > 0) {
         setBranches(branchesData);
         setNewCamera((prev) => ({ ...prev, branch_id: prev.branch_id || branchesData[0].id }));
+        setSelectedScanBranchId((prev) => prev || branchesData[0].id);
+        setDvrForm((prev) => ({ ...prev, branch_id: prev.branch_id || branchesData[0].id }));
       }
     } catch (err: any) {
       console.error('Failed to load cameras:', err);
@@ -176,7 +211,7 @@ export default function CamerasPage() {
   const handleAddDiscoveredCamera = async (cam: DiscoveredCamera, idx: number) => {
     setAddingIdx((prev) => ({ ...prev, [idx]: true }));
     try {
-      const branchId = branches[0]?.id || '';
+      const branchId = selectedScanBranchId || branches[0]?.id || '';
       const channelStr = cam.channel ? `CH${cam.channel}` : 'CH1';
       await api.post('/cameras/', {
         name: cam.name,
@@ -195,7 +230,7 @@ export default function CamerasPage() {
   };
 
   const handleAddAllDiscovered = async () => {
-    const branchId = branches[0]?.id || '';
+    const branchId = selectedScanBranchId || branches[0]?.id || '';
     setScanning(true);
     setScanMessage('جاري إضافة جميع الكاميرات المكتشفة إلى قاعدة البيانات...');
 
@@ -218,6 +253,84 @@ export default function CamerasPage() {
       alert('خطأ أثناء الإضافة: ' + err.message);
     } finally {
       setScanning(false);
+    }
+  };
+
+  const handleConnectDvr = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setDvrConnecting(true);
+    setDvrError('');
+    setDvrSuccess('');
+    setDvrChannels([]);
+    setDvrDeviceInfo(null);
+
+    try {
+      const res = await fetch('/api/cameras/dvr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dvrForm),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        setDvrError(data.error || 'تعذر الاتصال بجهاز الـ DVR. يرجى التحقق من عنوان الـ IP وبيانات الاعتماد.');
+        return;
+      }
+
+      setDvrDeviceInfo(data.device || null);
+      const mapped = (data.channels || []).map((ch: any) => ({
+        ...ch,
+        selected: true,
+      }));
+      setDvrChannels(mapped);
+      setDvrSuccess(`تم الاتصال بنجاح واستخراج ${mapped.length} قناة بث من جهاز الـ DVR!`);
+    } catch (err: any) {
+      setDvrError('خطأ أثناء فحص الـ DVR: ' + err.message);
+    } finally {
+      setDvrConnecting(false);
+    }
+  };
+
+  const handleToggleSelectAllDvr = (val: boolean) => {
+    setDvrChannels((prev) => prev.map((c) => ({ ...c, selected: val })));
+  };
+
+  const handleToggleDvrChannel = (idx: number) => {
+    setDvrChannels((prev) =>
+      prev.map((c, i) => (i === idx ? { ...c, selected: !c.selected } : c))
+    );
+  };
+
+  const handleImportSelectedDvrChannels = async () => {
+    const selected = dvrChannels.filter((c) => c.selected);
+    if (selected.length === 0) {
+      alert('يرجى تحديد قناة واحدة على الأقل للاستيراد');
+      return;
+    }
+
+    setDvrImporting(true);
+    const targetBranch = dvrForm.branch_id || (branches.length > 0 ? branches[0].id : '');
+
+    try {
+      let importedCount = 0;
+      for (const ch of selected) {
+        await api.post('/cameras/', {
+          name: ch.name || `كاميرا ${ch.channelNumber} (DVR ${dvrForm.ip})`,
+          branch_id: targetBranch,
+          rtsp_url: ch.mainRtspUrl,
+          dvr_ip: dvrForm.ip,
+          dvr_channel: ch.dvrChannel || `CH${ch.channelNumber}`,
+          protocol: 'rtsp',
+        }).catch(() => {});
+        importedCount++;
+      }
+
+      await loadData();
+      setShowDvrModal(false);
+      alert(`تم استيراد ${importedCount} قناة بنجاح من جهاز الـ DVR وتفعيلها للرصد والذكاء الاصطناعي!`);
+    } catch (err: any) {
+      alert('حدث خطأ أثناء الاستيراد: ' + err.message);
+    } finally {
+      setDvrImporting(false);
     }
   };
 
@@ -318,6 +431,13 @@ export default function CamerasPage() {
             <span>{syncingAgent ? 'جاري جلب الكاميرات...' : '📥 جلب كاميرات تطبيق Edge Agent'}</span>
           </button>
           <button
+            onClick={() => setShowDvrModal(true)}
+            className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 px-4 py-2 text-xs font-bold text-black hover:from-amber-400 hover:to-amber-500 transition-all shadow-lg shadow-amber-500/25 border border-amber-400/40"
+          >
+            <Radio className="h-4 w-4 text-black" />
+            <span>⚡ ربط واستيراد من DVR / NVR</span>
+          </button>
+          <button
             onClick={handleStartScan}
             className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-sky-600 to-sky-700 px-4 py-2 text-xs font-bold text-white hover:from-sky-500 hover:to-sky-600 transition-all shadow-lg shadow-sky-600/25 border border-sky-500/30"
           >
@@ -406,6 +526,13 @@ export default function CamerasPage() {
                           <Download className="h-4 w-4" />
                         )}
                         <span>📥 جلب كاميرات تطبيق Edge Agent</span>
+                      </button>
+                      <button
+                        onClick={() => setShowDvrModal(true)}
+                        className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 px-4 py-2 text-xs font-bold text-black hover:from-amber-400 hover:to-amber-500 transition-colors shadow-lg shadow-amber-500/20"
+                      >
+                        <Radio className="h-4 w-4 text-black" />
+                        <span>⚡ ربط واستيراد من DVR / NVR</span>
                       </button>
                       <button
                         onClick={handleStartScan}
@@ -506,6 +633,28 @@ export default function CamerasPage() {
                     بروتوكولات الفحص: SADP (EZVIZ / Hikvision) • ONVIF WS-Discovery • مسح منافذ RTSP (554)
                   </div>
                 </div>
+              </div>
+
+              {/* Branch Selector Dropdown */}
+              <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-3.5 space-y-2">
+                <label className="block text-slate-200 font-bold text-xs flex items-center gap-2">
+                  <Building2 className="h-4 w-4 text-amber-500" />
+                  <span>الفرع المستهدف لإضافة الكاميرات:</span>
+                </label>
+                <select
+                  value={selectedScanBranchId}
+                  onChange={(e) => setSelectedScanBranchId(e.target.value)}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800/90 px-3 py-2 text-white text-xs focus:outline-none focus:border-amber-500"
+                >
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-slate-400">
+                  سيتم تسجيل الكاميرات المكتشفة تلقائياً تحت هذا الفرع في حسابك وتظهر كشوفاتها باسم هذا الفرع.
+                </p>
               </div>
 
               {/* Discovered Cameras List */}
@@ -687,6 +836,296 @@ export default function CamerasPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Direct DVR / NVR Connect Modal */}
+      {showDvrModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md">
+          <div className="w-full max-w-3xl rounded-2xl border border-amber-500/30 bg-[#0b1222] p-6 shadow-2xl max-h-[92vh] flex flex-col">
+            <div className="flex items-start justify-between pb-4 border-b border-slate-800">
+              <div>
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400">
+                    <Radio className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white">
+                      ربط واستيراد قنوات الـ DVR / NVR تلقائياً
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      استخراج قنوات الكاميرات المتصلة بجهاز التسجيل (16 أو 32 قناة) مع توليد روابط الـ Main & Sub RTSP للذكاء الاصطناعي
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowDvrModal(false)}
+                className="text-slate-400 hover:text-white p-1 text-lg rounded-lg hover:bg-slate-800"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 py-4 space-y-4 pr-1">
+              {dvrError && (
+                <div className="flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <span>{dvrError}</span>
+                </div>
+              )}
+
+              {dvrSuccess && (
+                <div className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-400">
+                  <CheckCircle className="h-4 w-4 shrink-0" />
+                  <span>{dvrSuccess}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleConnectDvr} className="space-y-3.5 bg-slate-900/40 border border-slate-800/80 rounded-xl p-4 text-xs">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">عنوان IP الخاص بالـ DVR</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="192.168.8.234"
+                      value={dvrForm.ip}
+                      onChange={(e) => setDvrForm({ ...dvrForm, ip: e.target.value })}
+                      className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-white font-mono focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">المنفذ HTTP (ISAPI / CGI)</label>
+                    <input
+                      type="number"
+                      required
+                      value={dvrForm.port}
+                      onChange={(e) => setDvrForm({ ...dvrForm, port: parseInt(e.target.value) || 80 })}
+                      className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-white font-mono focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">منفذ البث RTSP</label>
+                    <input
+                      type="number"
+                      required
+                      value={dvrForm.rtspPort}
+                      onChange={(e) => setDvrForm({ ...dvrForm, rtspPort: parseInt(e.target.value) || 554 })}
+                      className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-white font-mono focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">اسم المستخدم (DVR)</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="admin"
+                      value={dvrForm.username}
+                      onChange={(e) => setDvrForm({ ...dvrForm, username: e.target.value })}
+                      className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">كلمة المرور (DVR)</label>
+                    <input
+                      type="password"
+                      placeholder="كلمة مرور الـ DVR"
+                      value={dvrForm.password}
+                      onChange={(e) => setDvrForm({ ...dvrForm, password: e.target.value })}
+                      className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">نوع الجهاز / الشركة المصنعة</label>
+                    <select
+                      value={dvrForm.brand}
+                      onChange={(e) => setDvrForm({ ...dvrForm, brand: e.target.value })}
+                      className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    >
+                      <option value="hikvision">Hikvision / HiLook / EZVIZ (ISAPI)</option>
+                      <option value="dahua">Dahua / Dahua-OEM (CGI)</option>
+                      <option value="generic">ONVIF / Generic RTSP</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">أقصى عدد قنوات</label>
+                    <select
+                      value={dvrForm.maxChannels}
+                      onChange={(e) => setDvrForm({ ...dvrForm, maxChannels: parseInt(e.target.value) || 16 })}
+                      className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    >
+                      <option value={4}>4 قنوات</option>
+                      <option value={8}>8 قنوات</option>
+                      <option value={16}>16 قناة (الافتراضي)</option>
+                      <option value={32}>32 قناة</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">الفرع التابع له</label>
+                    <select
+                      value={dvrForm.branch_id}
+                      onChange={(e) => setDvrForm({ ...dvrForm, branch_id: e.target.value })}
+                      className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    >
+                      {branches.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="submit"
+                    disabled={dvrConnecting}
+                    className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 px-5 py-2.5 font-bold text-black hover:from-amber-400 hover:to-amber-500 disabled:opacity-50 transition shadow-lg shadow-amber-500/20"
+                  >
+                    {dvrConnecting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin text-black" />
+                        <span>جاري الاتصال وفحص القنوات...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Radio className="h-4 w-4 text-black" />
+                        <span>فحص واستخراج قنوات الـ DVR</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+
+              {/* Channels List */}
+              {dvrChannels.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between text-xs bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+                    <div className="flex items-center gap-3">
+                      <span className="font-bold text-white">
+                        القنوات المكتشفة: {dvrChannels.filter((c) => c.selected).length} من أصل {dvrChannels.length} قناة
+                      </span>
+                      {dvrDeviceInfo?.model && (
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-400 font-mono">
+                          موديل: {dvrDeviceInfo.model}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleSelectAllDvr(true)}
+                        className="text-[11px] text-amber-400 hover:underline"
+                      >
+                        تحديد الكل
+                      </button>
+                      <span className="text-slate-600">•</span>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleSelectAllDvr(false)}
+                        className="text-[11px] text-slate-400 hover:underline"
+                      >
+                        إلغاء التحديد
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-400 text-[11px] flex items-center gap-2">
+                    <ShieldCheck className="h-4 w-4 shrink-0" />
+                    <span>
+                      ميزة البث المزدوج (Dual-Streaming): سيتم ربط مسار الـ Main Stream للصور الأصلية والتوثيق، ومسار الـ Sub-Stream لمعالجة الذكاء الاصطناعي الخفيفة YOLOX لتوفير موارد المعالج.
+                    </span>
+                  </div>
+
+                  <div className="max-h-64 overflow-y-auto space-y-2 divide-y divide-slate-800/40">
+                    {dvrChannels.map((ch, idx) => {
+                      const isSelected = !!ch.selected;
+                      return (
+                        <div
+                          key={idx}
+                          onClick={() => handleToggleDvrChannel(idx)}
+                          className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition ${
+                            isSelected
+                              ? 'border-amber-500/40 bg-amber-500/5 hover:bg-amber-500/10'
+                              : 'border-slate-800/70 bg-slate-900/30 hover:bg-slate-900/60 opacity-60'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => {}}
+                              className="rounded border-slate-700 text-amber-500 focus:ring-0 focus:ring-offset-0"
+                            />
+                            <div className="w-8 h-8 rounded-lg bg-slate-800 text-amber-400 flex items-center justify-center font-bold text-xs shrink-0 font-mono">
+                              {ch.channelNumber}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-white text-xs">{ch.name}</span>
+                                <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 font-mono">
+                                  {ch.dvrChannel}
+                                </span>
+                              </div>
+                              <div className="text-[10px] font-mono text-slate-500 truncate max-w-md mt-0.5" dir="ltr">
+                                {ch.mainRtspUrl}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="text-left shrink-0">
+                            <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
+                              {ch.resolution || '1080p'}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between pt-4 border-t border-slate-800 bg-[#0b1222]">
+              <button
+                type="button"
+                onClick={() => setShowDvrModal(false)}
+                className="rounded-lg bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700 transition"
+              >
+                إغلاق
+              </button>
+
+              {dvrChannels.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleImportSelectedDvrChannels}
+                  disabled={dvrImporting || dvrChannels.filter((c) => c.selected).length === 0}
+                  className="flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-2 text-xs font-bold text-white hover:bg-emerald-500 disabled:opacity-50 transition shadow-lg shadow-emerald-600/25"
+                >
+                  {dvrImporting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin text-white" />
+                      <span>جاري استيراد القنوات...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="h-4 w-4" />
+                      <span>
+                        استيراد القنوات المحددة ({dvrChannels.filter((c) => c.selected).length}) وحفظها بالمنصة
+                      </span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

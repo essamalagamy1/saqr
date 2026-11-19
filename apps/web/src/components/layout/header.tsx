@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { 
   Bell, Search, Building2, 
-  ExternalLink, LogOut, Copy 
+  ExternalLink, LogOut, Copy, Menu
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -20,7 +20,11 @@ interface LiveAlert {
   detected_at: string;
 }
 
-export function Header() {
+interface HeaderProps {
+  onToggleMobileNav?: () => void;
+}
+
+export function Header({ onToggleMobileNav }: HeaderProps) {
   const router = useRouter();
   const [unreadCount, setUnreadCount] = useState<number>(0);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -163,15 +167,29 @@ export function Header() {
 
   return (
     <>
-      <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-slate-800/80 bg-[#0b1120]/90 px-6 backdrop-blur">
-        {/* Right side: Branch select + Search */}
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-1.5 text-sm text-slate-300">
-            <Building2 className="h-4 w-4 text-amber-500" />
-            <span className="font-medium text-slate-200">جميع الفروع (فرع القاهرة الجديدة)</span>
+      <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-slate-800/80 bg-[#0b1120]/95 px-3 sm:px-6 backdrop-blur">
+        {/* Right side: Mobile Hamburger + Branch select + Search */}
+        <div className="flex items-center gap-2 sm:gap-4">
+          {/* Mobile Navigation Toggle Button */}
+          <button
+            type="button"
+            onClick={onToggleMobileNav}
+            className="lg:hidden p-2 rounded-lg border border-slate-800 bg-slate-900/80 text-slate-300 hover:text-white hover:bg-slate-800 transition shadow-sm cursor-pointer"
+            title="القائمة الرئيسية"
+            aria-label="Toggle navigation menu"
+          >
+            <Menu className="h-5 w-5 text-amber-500" />
+          </button>
+
+          {/* Branch Selector Pill */}
+          <div className="flex items-center gap-1.5 sm:gap-2 rounded-lg border border-slate-800 bg-slate-900/60 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm text-slate-300">
+            <Building2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-amber-500 shrink-0" />
+            <span className="font-medium text-slate-200 truncate max-w-[120px] sm:max-w-none">
+              فرع القاهرة الجديدة
+            </span>
           </div>
 
-          <form onSubmit={handleSearchSubmit} className="relative w-72 hidden md:block">
+          <form onSubmit={handleSearchSubmit} className="relative w-64 xl:w-72 hidden md:block">
             <Search className="absolute right-3 top-2.5 h-4 w-4 text-slate-500" />
             <input
               type="text"
@@ -184,14 +202,15 @@ export function Header() {
         </div>
 
         {/* Left side: System status + Notifications + Profile */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           {/* Real-time Online Indicator */}
-          <div className="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-400">
+          <div className="flex items-center gap-1.5 sm:gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-2 sm:px-3 py-1.5 text-[11px] sm:text-xs text-emerald-400">
             <span className="relative flex h-2 w-2">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
               <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
             </span>
-            <span className="font-medium">المعالجة الذكية متصلة (YOLOX)</span>
+            <span className="font-medium hidden sm:inline">المعالجة متصلة (YOLOX)</span>
+            <span className="font-medium sm:hidden">YOLOX</span>
           </div>
 
           {/* Notifications Icon with Badge */}
@@ -210,7 +229,7 @@ export function Header() {
 
             {/* Notifications Dropdown */}
             {showNotifications && (
-              <div className="absolute left-0 mt-2 w-80 rounded-xl border border-slate-800 bg-slate-900/95 p-3 shadow-2xl backdrop-blur-md z-50 animate-in fade-in slide-in-from-top-2">
+              <div className="absolute left-0 mt-2 w-72 sm:w-80 max-w-[calc(100vw-32px)] rounded-xl border border-slate-800 bg-slate-900/95 p-3 shadow-2xl backdrop-blur-md z-50 animate-in fade-in slide-in-from-top-2">
                 <div className="flex items-center justify-between pb-2 border-b border-slate-800">
                   <span className="text-xs font-bold text-slate-200">أحدث تنبيهات الرصد</span>
                   <button 

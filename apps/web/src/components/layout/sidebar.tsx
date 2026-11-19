@@ -12,12 +12,18 @@ import {
   Building2,
   TrendingUp,
   CheckSquare,
-  ShieldCheck
+  ShieldCheck,
+  X
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
 
-export function Sidebar() {
+interface SidebarProps {
+  isOpen?: boolean;
+  onClose?: () => void;
+}
+
+export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const pathname = usePathname();
   const [counts, setCounts] = useState<{
     aiServices?: number;
@@ -96,10 +102,19 @@ export function Sidebar() {
   ];
 
   return (
-    <aside className="fixed right-0 top-0 z-40 h-screen w-64 border-l border-slate-800/80 bg-[#0d1527] transition-transform">
+    <aside
+      className={cn(
+        'fixed right-0 top-0 z-50 h-screen w-64 border-l border-slate-800/80 bg-[#0d1527] transition-transform duration-300 ease-in-out lg:translate-x-0 shadow-2xl lg:shadow-none',
+        isOpen ? 'translate-x-0' : 'translate-x-full'
+      )}
+    >
       {/* Brand Header */}
-      <div className="flex h-16 items-center justify-between border-b border-slate-800/80 px-6">
-        <Link href="/" className="flex items-center gap-3">
+      <div className="flex h-16 items-center justify-between border-b border-slate-800/80 px-5">
+        <Link 
+          href="/" 
+          onClick={onClose}
+          className="flex items-center gap-3"
+        >
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-amber-600 shadow-lg shadow-amber-500/20">
             <ShieldCheck className="h-5 w-5 text-black stroke-[2.5]" />
           </div>
@@ -110,6 +125,17 @@ export function Sidebar() {
             </span>
           </div>
         </Link>
+
+        {/* Mobile Close Button */}
+        <button
+          type="button"
+          onClick={onClose}
+          className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 lg:hidden transition"
+          title="إغلاق القائمة"
+          aria-label="Close sidebar"
+        >
+          <X className="h-5 w-5" />
+        </button>
       </div>
 
       {/* Navigation List */}
@@ -129,6 +155,7 @@ export function Sidebar() {
                   <li key={item.href}>
                     <Link
                       href={item.href}
+                      onClick={onClose}
                       className={cn(
                         'group flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150',
                         isActive

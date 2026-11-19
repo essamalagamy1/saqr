@@ -119,12 +119,21 @@ CREATE TABLE IF NOT EXISTS detections (
     metadata JSONB DEFAULT '{}',
     snapshot_url TEXT,
     video_clip_url TEXT,
+    storage_tier VARCHAR(20) DEFAULT 'hot',
+    is_pinned BOOLEAN DEFAULT false,
+    pinned_at TIMESTAMPTZ,
+    pinned_reason VARCHAR(100),
+    original_size_bytes INT DEFAULT 0,
+    compressed_size_bytes INT DEFAULT 0,
     is_read BOOLEAN DEFAULT false,
     is_acknowledged BOOLEAN DEFAULT false,
     acknowledged_by VARCHAR(255),
     detected_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_detections_storage_tier ON detections(storage_tier);
+CREATE INDEX IF NOT EXISTS idx_detections_is_pinned ON detections(is_pinned);
 
 -- Seed initial AI Services
 INSERT INTO ai_services (slug, name, description, category) VALUES

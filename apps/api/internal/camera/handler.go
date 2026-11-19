@@ -76,7 +76,7 @@ func (h *Handler) List(c *fiber.Ctx) error {
 	}
 	defer rows.Close()
 
-	var cameras []Camera
+	cameras := []Camera{}
 	for rows.Next() {
 		var cam Camera
 		if err := rows.Scan(

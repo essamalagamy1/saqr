@@ -198,50 +198,61 @@ class AgentRunner {
       const newDetections = this.tracker.filterNewDetections(camera.id, detections);
       if (newDetections.length === 0) return;
 
-      // Build detection event
-      for (const det of newDetections) {
-        // Upload a frozen snapshot of this exact frame for the detection card
-        let snapshotUrl = null;
-        if (this.apiClient && frameBuffer && frameBuffer.length > 500) {
-          const snapshotId = `${camera.id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-          snapshotUrl = await this.apiClient.uploadSnapshot(snapshotId, frameBuffer);
-        }
+      // When multiple objects/persons are detected, group them into a rich detection
+      let snapshotUrl = null;
+      if (this.apiClient && frameBuffer && frameBuffer.length > 500) {
+        const snapshotId = `${camera.id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        snapshotUrl = await this.apiClient.uploadSnapshot(snapshotId, frameBuffer);
+      }
 
-        const event = {
-          camera_id: camera.id,
-          camera_name: camera.name,
-          branch_id: camera.branchId || camera.branch_id || '',
-          ai_service_slug: 'object_detection',
-          type: `${det.label} detected`,
-          severity: det.label === 'person' ? 'low' : 'medium',
-          confidence: det.score,
-          bounding_boxes: JSON.stringify([det.box]),
-          snapshot_url: snapshotUrl || null,
-          metadata: JSON.stringify({
-            class: det.label,
-            classId: det.classId,
-            source: 'saqr-edge-agent',
-          }),
-        };
+      const colors = ['#3b82f6', '#06b6d4', '#10b981', '#a855f7', '#f59e0b', '#ec4899'];
+      const richBoxes = newDetections.map((det, idx) => ({
+        box: det.box,
+        label: newDetections.length === 1 ? `${det.label} detected` : `${det.label} ${idx + 1} (${Math.round(det.score * 100)}%)`,
+        score: det.score,
+        color: colors[idx % colors.length]
+      }));
 
-        // Send to cloud API
-        try {
-          await this.apiClient.postDetection(event);
-          this.stats.detectionsSent++;
-          console.log(`[AGENT] ✅ Detection sent: ${det.label} (${det.score}) from ${camera.name}`);
-        } catch (err) {
-          console.error(`[AGENT] Failed to send detection:`, err.message);
-          this.stats.errors++;
-        }
+      const topDet = newDetections[0];
+      const isMultiple = newDetections.length > 1;
+      const type = isMultiple 
+        ? `رصد أشخاص متعددين (${newDetections.length} أشخاص)`
+        : `${topDet.label} detected`;
 
-        // Notify renderer
-        if (this.onDetection) {
-          this.onDetection({
-            ...event,
-            timestamp: new Date().toISOString(),
-            detection: det,
-          });
-        }
+      const event = {
+        camera_id: camera.id,
+        camera_name: camera.name,
+        branch_id: camera.branchId || camera.branch_id || '',
+        ai_service_slug: 'employee_monitoring',
+        type,
+        severity: isMultiple ? 'medium' : (topDet.label === 'person' ? 'low' : 'medium'),
+        confidence: Math.max(...newDetections.map(d => d.score)),
+        bounding_boxes: JSON.stringify(richBoxes),
+        snapshot_url: snapshotUrl || null,
+        metadata: JSON.stringify({
+          class: topDet.label,
+          total_objects: newDetections.length,
+          boxes: richBoxes,
+          source: 'saqr-edge-agent',
+        }),
+      };
+
+      try {
+        await this.apiClient.postDetection(event);
+        this.stats.detectionsSent++;
+        console.log(`[AGENT] ✅ Detection sent: ${type} from ${camera.name} (${richBoxes.length} boxes)`);
+      } catch (err) {
+        console.error(`[AGENT] Failed to send detection:`, err.message);
+        this.stats.errors++;
+      }
+
+      // Notify renderer
+      if (this.onDetection) {
+        this.onDetection({
+          ...event,
+          timestamp: new Date().toISOString(),
+          detection: topDet,
+        });
       }
     } catch (err) {
       console.error('[AGENT] Processing error:', err.message);

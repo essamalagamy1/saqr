@@ -296,14 +296,31 @@ async function saveEditPassword() {
   rased.cameras.syncAllToCloud().catch(() => {});
 }
 
+async function loadBranchesDropdown() {
+  const select = document.getElementById('cameraBranch');
+  if (!select) return;
+  select.innerHTML = '<option value="">جاري تحميل الفروع من حسابك...</option>';
+  try {
+    const res = await rased.branches.list();
+    if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {
+      select.innerHTML = res.data.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
+    } else {
+      select.innerHTML = '<option value="">فرع القاهرة الجديدة (الافتراضي)</option>';
+    }
+  } catch (err) {
+    console.warn('Failed to load branches:', err);
+    select.innerHTML = '<option value="">فرع القاهرة الجديدة (الافتراضي)</option>';
+  }
+}
+
 function showAddCameraModal() {
   document.getElementById('addCameraModal').style.display = 'flex';
   document.getElementById('cameraName').value = '';
   document.getElementById('cameraRtsp').value = '';
   document.getElementById('cameraAddUser').value = 'admin';
   document.getElementById('cameraAddPass').value = '';
-  document.getElementById('cameraBranch').value = '';
   document.getElementById('cameraTestResult').style.display = 'none';
+  loadBranchesDropdown();
 }
 
 function closeAddCameraModal() {
@@ -315,7 +332,9 @@ async function addCamera() {
   let rtspUrl = document.getElementById('cameraRtsp').value.trim();
   const addUser = document.getElementById('cameraAddUser').value.trim();
   const addPass = document.getElementById('cameraAddPass').value.trim();
-  const branchId = document.getElementById('cameraBranch').value.trim();
+  const branchSelect = document.getElementById('cameraBranch');
+  const branchId = branchSelect ? branchSelect.value.trim() : '';
+  const branchName = branchSelect && branchSelect.selectedIndex >= 0 ? branchSelect.options[branchSelect.selectedIndex].text : '';
 
   if (!name) { alert('يرجى تحديد اسم للكاميرا'); return; }
   if (!rtspUrl) { alert('يرجى إدخال عنوان RTSP للبث'); return; }
@@ -328,7 +347,7 @@ async function addCamera() {
     rtspUrl = 'rtsp://' + rtspUrl;
   }
 
-  await rased.cameras.add({ name, rtspUrl, branchId, enabled: true });
+  await rased.cameras.add({ name, rtspUrl, branchId, branchName, enabled: true });
   closeAddCameraModal();
   loadCameras();
 }
@@ -867,6 +886,173 @@ async function addAllDiscoveredCameras() {
 
 function closeScanModal() {
   document.getElementById('scanCamerasModal').style.display = 'none';
+}
+
+// ===== DVR / NVR Direct Connect & Channel Importer =====
+let fetchedDvrChannels = [];
+
+async function showDvrModal() {
+  const modal = document.getElementById('dvrConnectModal');
+  modal.style.display = 'flex';
+  document.getElementById('dvrChannelsResultBox').style.display = 'none';
+  document.getElementById('btnImportDvrChannels').style.display = 'none';
+
+  // Populate branches select
+  const branchSelect = document.getElementById('dvrBranchSelect');
+  branchSelect.innerHTML = '<option value="">جاري تحميل الفروع...</option>';
+  try {
+    const res = await rased.branches.list();
+    if (res && res.success && res.data && res.data.length > 0) {
+      branchSelect.innerHTML = res.data.map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('');
+    } else {
+      branchSelect.innerHTML = '<option value="default">الفرع الرئيسي</option>';
+    }
+  } catch {
+    branchSelect.innerHTML = '<option value="default">الفرع الرئيسي</option>';
+  }
+}
+
+function closeDvrModal() {
+  document.getElementById('dvrConnectModal').style.display = 'none';
+}
+
+async function connectAndFetchDvrChannels() {
+  const ip = document.getElementById('dvrIpInput').value.trim();
+  const brand = document.getElementById('dvrBrandSelect').value;
+  const username = document.getElementById('dvrUsernameInput').value.trim() || 'admin';
+  const password = document.getElementById('dvrPasswordInput').value;
+  const httpPort = parseInt(document.getElementById('dvrHttpPortInput').value, 10) || 80;
+  const rtspPort = parseInt(document.getElementById('dvrRtspPortInput').value, 10) || 554;
+
+  if (!ip) {
+    alert('يرجى إدخال عنوان IP الخاص بجهاز الـ DVR');
+    return;
+  }
+
+  const spinner = document.getElementById('dvrFetchSpinner');
+  const btnText = document.getElementById('dvrFetchBtnText');
+  const btn = document.getElementById('btnConnectDvr');
+
+  spinner.style.display = 'inline-block';
+  btnText.textContent = 'جاري الاتصال بالـ DVR وسحب القنوات...';
+  btn.disabled = true;
+
+  try {
+    const res = await rased.dvr.connectAndFetch({
+      ip,
+      httpPort,
+      rtspPort,
+      username,
+      password,
+      brand,
+      maxChannels: 16
+    });
+
+    if (res && res.success && res.channels && res.channels.length > 0) {
+      fetchedDvrChannels = res.channels;
+      renderDvrChannels(res);
+    } else {
+      alert('لم يتم العثور على قنوات متصلة أو لم يستجب الـ DVR. تأكد من صحة الـ IP وكلمة المرور.');
+    }
+  } catch (err) {
+    alert('فشل في الاتصال بالـ DVR: ' + (err.message || 'خطأ غير معروف'));
+  } finally {
+    spinner.style.display = 'none';
+    btnText.textContent = '🔍 فحص واستخراج قنوات الكاميرات (Fetch Channels)';
+    btn.disabled = false;
+  }
+}
+
+function renderDvrChannels(res) {
+  const resultBox = document.getElementById('dvrChannelsResultBox');
+  const list = document.getElementById('dvrChannelsList');
+  const badge = document.getElementById('dvrDeviceBadge');
+  const modelText = document.getElementById('dvrDeviceModel');
+  const btnImport = document.getElementById('btnImportDvrChannels');
+
+  resultBox.style.display = 'block';
+  btnImport.style.display = 'inline-flex';
+
+  badge.textContent = `${res.channels.length} قناة مستخرجة`;
+  modelText.textContent = `${res.device.model || 'DVR'} (${res.brand})`;
+
+  list.innerHTML = res.channels.map((ch, idx) => `
+    <div style="display: flex; align-items: center; justify-content: space-between; background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 10px 12px;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <input type="checkbox" class="dvr-channel-checkbox" id="dvr-ch-check-${idx}" data-idx="${idx}" checked onchange="updateDvrSelectedCount()">
+        <div style="width: 28px; height: 28px; border-radius: 6px; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.25); display: flex; align-items: center; justify-content: center; color: #38bdf8; font-weight: 700; font-size: 11px;">
+          ${ch.channelNumber}
+        </div>
+        <div>
+          <div style="font-weight: 700; font-size: 12px; color: #fff;">${escapeHtml(ch.name)}</div>
+          <div style="font-size: 10px; font-family: monospace; color: #64748b;" dir="ltr">${escapeHtml(ch.mainRtspUrl)}</div>
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <span style="font-size: 10px; background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); padding: 1px 6px; border-radius: 12px; font-weight: 600;">
+          ${escapeHtml(ch.resolution || '1080p')}
+        </span>
+        <span style="font-size: 10px; background: rgba(56, 189, 248, 0.1); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.2); padding: 1px 6px; border-radius: 12px;">
+          Dual Stream
+        </span>
+      </div>
+    </div>
+  `).join('');
+
+  updateDvrSelectedCount();
+}
+
+function toggleSelectAllDvrChannels(checked) {
+  document.querySelectorAll('.dvr-channel-checkbox').forEach(cb => {
+    cb.checked = checked;
+  });
+  updateDvrSelectedCount();
+}
+
+function updateDvrSelectedCount() {
+  const selected = document.querySelectorAll('.dvr-channel-checkbox:checked').length;
+  document.getElementById('dvrSelectedCountText').textContent = selected;
+}
+
+async function importSelectedDvrChannels() {
+  const checkboxes = document.querySelectorAll('.dvr-channel-checkbox:checked');
+  if (checkboxes.length === 0) {
+    alert('يرجى اختيار كاميرا واحدة على الأقل للاستيراد');
+    return;
+  }
+
+  const branchSelect = document.getElementById('dvrBranchSelect');
+  const branchId = branchSelect.value;
+  const branchName = branchSelect.options[branchSelect.selectedIndex]?.text || 'الفرع الرئيسي';
+
+  const btnImport = document.getElementById('btnImportDvrChannels');
+  btnImport.disabled = true;
+  btnImport.textContent = `جاري استيراد وتفعيل ${checkboxes.length} كاميرا...`;
+
+  let added = 0;
+  for (const cb of checkboxes) {
+    const idx = parseInt(cb.getAttribute('data-idx'), 10);
+    const ch = fetchedDvrChannels[idx];
+    if (ch) {
+      await rased.cameras.add({
+        name: ch.name,
+        rtspUrl: ch.mainRtspUrl,
+        subRtspUrl: ch.subRtspUrl,
+        branchId,
+        branchName,
+        dvrIp: ch.dvrIp,
+        dvrChannel: ch.dvrChannel,
+        channel: ch.channelNumber,
+        brand: ch.brand || 'DVR'
+      });
+      added++;
+    }
+  }
+
+  closeDvrModal();
+  loadCameras();
+  rased.cameras.syncAllToCloud().catch(() => {});
+  alert(`✅ تم استيراد وتفعيل ${added} كاميرا من جهاز الـ DVR بنجاح ومزامنتها مع منصة صقر! الكاميرات الآن تعمل وتستقبل التحليل الذكي.`);
 }
 
 // ===== Auto-Updater =====

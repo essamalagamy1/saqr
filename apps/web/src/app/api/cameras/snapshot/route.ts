@@ -1,6 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
 
 export const dynamic = 'force-dynamic';
+
+const STORAGE_DIR = process.env.SNAPSHOT_STORAGE_DIR || '/mnt/essam/sites/saqr/storage/snapshots';
+const HOT_DIR = path.join(STORAGE_DIR, 'hot');
+
+// Ensure hot directory exists
+try {
+  if (!fs.existsSync(HOT_DIR)) {
+    fs.mkdirSync(HOT_DIR, { recursive: true });
+  }
+} catch (e) {
+  console.warn('Failed to initialize storage directory:', e);
+}
 
 // In-memory snapshot store: snapshotId → { buffer, createdAt }
 declare global {
@@ -35,23 +49,27 @@ export async function POST(req: NextRequest) {
       req.headers.get('x-snapshot-id') ||
       `snap_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-    // Evict oldest if limit reached
+    // 1. Evict oldest if memory limit reached
     if (global.detectionSnapshots!.size >= MAX_SNAPSHOTS) {
       const firstKey = global.detectionSnapshots!.keys().next().value;
       if (firstKey) global.detectionSnapshots!.delete(firstKey);
     }
 
+    // 2. Save in fast memory cache
     global.detectionSnapshots!.set(snapshotId, {
       buffer,
       createdAt: Date.now(),
     });
 
-    // Build absolute URL using the request host
-    const origin = req.headers.get('x-forwarded-host')
-      ? `${req.headers.get('x-forwarded-proto') || 'https'}://${req.headers.get('x-forwarded-host')}`
-      : new URL(req.url).origin;
+    // 3. Save to Tiered Storage Disk (Hot Tier: original quality)
+    try {
+      const filePath = path.join(HOT_DIR, `${snapshotId}.jpg`);
+      fs.promises.writeFile(filePath, buffer).catch((err) => {
+        console.warn('Error saving snapshot to disk:', err.message);
+      });
+    } catch {}
 
-    const url = `${origin}/api/cameras/snapshot/${snapshotId}`;
+    const url = `/api/cameras/snapshot/${snapshotId}`;
 
     return NextResponse.json({ success: true, snapshotId, url });
   } catch (err: any) {

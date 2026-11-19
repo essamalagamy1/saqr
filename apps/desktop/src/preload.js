@@ -40,6 +40,16 @@ const saqrBridge = {
     scanNetwork: () => ipcRenderer.invoke('cameras:scanNetwork'),
   },
 
+  // Branches
+  branches: {
+    list: () => ipcRenderer.invoke('branches:list'),
+  },
+
+  // DVR / NVR Direct Connect
+  dvr: {
+    connectAndFetch: (config) => ipcRenderer.invoke('dvr:connect-and-fetch', config),
+  },
+
   // Agent
   agent: {
     start: () => ipcRenderer.invoke('agent:start'),

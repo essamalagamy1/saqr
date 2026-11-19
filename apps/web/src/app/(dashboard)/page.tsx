@@ -127,7 +127,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Top Operational Controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <div className="rounded-lg border border-slate-800 bg-slate-900/80 px-3 py-1.5 text-xs text-slate-300 font-mono">
             {dateRange}
           </div>

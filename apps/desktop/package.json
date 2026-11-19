@@ -1,18 +1,10 @@
 {
   "name": "saqr-edge-agent",
-  "version": "1.3.8",
+  "version": "1.3.11",
   "description": "Saqr Edge Agent — AI-powered camera monitoring for Windows",
   "main": "src/main.js",
   "author": "Saqr",
   "license": "MIT",
-  "scripts": {
-    "start": "electron .",
-    "dev": "cross-env NODE_ENV=development electron .",
-    "build": "electron-builder --win",
-    "build:dir": "electron-builder --win --dir",
-    "publish:update": "electron-builder --win --dir && cp -f dist/win-unpacked/resources/app.asar ../web/public/downloads/ && cd dist && rm -f Saqr-Edge-Agent-Win64.zip && zip -q -r -9 Saqr-Edge-Agent-Win64.zip win-unpacked && cp -f Saqr-Edge-Agent-Win64.zip ../../web/public/downloads/",
-    "postinstall": "electron-builder install-app-deps"
-  },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "electron-store": "^8.2.0",
@@ -21,72 +13,6 @@
     "onnxruntime-node": "^1.21.0",
     "sharp": "^0.33.5",
     "uuid": "^11.1.0"
-  },
-  "devDependencies": {
-    "cross-env": "^7.0.3",
-    "electron": "^33.3.1",
-    "electron-builder": "^25.1.8"
-  },
-  "build": {
-    "appId": "com.saqr.edge-agent",
-    "productName": "Saqr Edge Agent",
-    "copyright": "Copyright © 2026 Saqr",
-    "directories": {
-      "output": "dist",
-      "buildResources": "assets"
-    },
-    "compression": "maximum",
-    "files": [
-      "src/**/*",
-      "renderer/**/*",
-      "assets/**/*",
-      "models/**/*",
-      "node_modules/**/*",
-      "!node_modules/**/test/**",
-      "!node_modules/**/tests/**",
-      "!node_modules/**/docs/**",
-      "!node_modules/**/*.md",
-      "!node_modules/**/*.map",
-      "!node_modules/onnxruntime-node/bin/napi-v6/darwin/**",
-      "!node_modules/onnxruntime-node/bin/napi-v6/linux/**",
-      "!node_modules/onnxruntime-node/bin/napi-v6/win32/arm64/**",
-      "!node_modules/onnxruntime-node/bin/napi-v6/win32/ia32/**",
-      "!node_modules/@ffmpeg-installer/linux*/**",
-      "!node_modules/@ffmpeg-installer/darwin*/**",
-      "!node_modules/@img/sharp-linux*/**",
-      "!node_modules/@img/sharp-darwin*/**",
-      "!node_modules/@img/sharp-libvips-linux*/**",
-      "!node_modules/@img/sharp-libvips-darwin*/**",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "models/",
-        "to": "models/",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "assets/bin/ffmpeg.exe",
-        "to": "bin/ffmpeg.exe"
-      }
-    ],
-    "asarUnpack": [
-      "**/@ffmpeg-installer/**",
-      "assets/bin/**"
-    ],
-    "win": {
-      "target": [
-        {
-          "target": "zip",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "assets/icon.png"
-    }
   },
   "optionalDependencies": {
     "@ffmpeg-installer/win32-x64": "^4.1.0"

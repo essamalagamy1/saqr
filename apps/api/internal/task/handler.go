@@ -97,6 +97,15 @@ func (h *Handler) Create(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"success": false, "error": err.Error()})
 	}
 
+	// Auto-pin detection to exempt from cold storage purge when converted to task
+	if req.DetectionID != nil && *req.DetectionID != "" {
+		_, _ = h.db.Exec(c.Context(), `
+			UPDATE detections 
+			SET is_pinned = true, is_acknowledged = true, pinned_reason = 'task_converted', pinned_at = NOW() 
+			WHERE id = $1 AND company_id = $2
+		`, *req.DetectionID, companyID)
+	}
+
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"success": true, "data": fiber.Map{"id": id}})
 }
 

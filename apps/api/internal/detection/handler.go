@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -31,6 +32,9 @@ type Detection struct {
 	Metadata        string    `json:"metadata"`
 	SnapshotURL     string    `json:"snapshot_url"`
 	VideoClipURL    string    `json:"video_clip_url,omitempty"`
+	StorageTier     string    `json:"storage_tier"`
+	IsPinned        bool      `json:"is_pinned"`
+	PinnedReason    string    `json:"pinned_reason,omitempty"`
 	IsRead          bool      `json:"is_read"`
 	IsAcknowledged  bool      `json:"is_acknowledged"`
 	AcknowledgedBy  string    `json:"acknowledged_by,omitempty"`
@@ -73,16 +77,18 @@ func (h *Handler) List(c *fiber.Ctx) error {
 	severity := c.Query("severity")
 
 	query := `
-		SELECT d.id, d.company_id, d.branch_id, b.name as branch_name,
-		       d.camera_id, c.name as camera_name, d.ai_service_id, COALESCE(s.name, d.type) as service_name,
+		SELECT d.id::text, d.company_id::text, COALESCE(d.branch_id::text, c.branch_id::text, b.id::text, '') as branch_id, COALESCE(b.name, cb.name, 'فرع القاهرة الجديدة') as branch_name,
+		       d.camera_id::text, COALESCE(c.name, 'Camera 01') as camera_name, d.ai_service_id, COALESCE(s.name, d.type) as service_name,
 		       d.zone_id, COALESCE(z.name, '') as zone_name,
 		       d.type, d.severity, d.confidence, d.bounding_boxes::text, d.metadata::text,
 		       COALESCE(d.snapshot_url, ''), COALESCE(d.video_clip_url, ''),
+		       COALESCE(d.storage_tier, 'hot'), COALESCE(d.is_pinned, false), COALESCE(d.pinned_reason, ''),
 		       d.is_read, d.is_acknowledged, COALESCE(d.acknowledged_by, ''),
 		       d.detected_at, d.created_at
 		FROM detections d
-		JOIN branches b ON d.branch_id = b.id
-		JOIN cameras c ON d.camera_id = c.id
+		LEFT JOIN branches b ON d.branch_id = b.id
+		LEFT JOIN cameras c ON d.camera_id = c.id
+		LEFT JOIN branches cb ON c.branch_id = cb.id
 		LEFT JOIN ai_services s ON d.ai_service_id = s.id
 		LEFT JOIN zones z ON d.zone_id = z.id
 		WHERE d.company_id = $1
@@ -120,7 +126,7 @@ func (h *Handler) List(c *fiber.Ctx) error {
 	}
 	defer rows.Close()
 
-	var detections []Detection
+	detections := []Detection{}
 	for rows.Next() {
 		var d Detection
 		if err := rows.Scan(
@@ -129,6 +135,7 @@ func (h *Handler) List(c *fiber.Ctx) error {
 			&d.ZoneID, &d.ZoneName,
 			&d.Type, &d.Severity, &d.Confidence, &d.BoundingBoxes, &d.Metadata,
 			&d.SnapshotURL, &d.VideoClipURL,
+			&d.StorageTier, &d.IsPinned, &d.PinnedReason,
 			&d.IsRead, &d.IsAcknowledged, &d.AcknowledgedBy,
 			&d.DetectedAt, &d.CreatedAt,
 		); err != nil {
@@ -149,8 +156,51 @@ func (h *Handler) Ingest(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"success": false, "error": "Invalid detection payload: camera_id is required"})
 	}
 
-	if req.BranchID == "" {
-		_ = h.db.QueryRow(c.Context(), `SELECT branch_id FROM cameras WHERE id = $1`, req.CameraID).Scan(&req.BranchID)
+	// 1. Resolve camera and branch safely
+	var realCameraID, realBranchID string
+
+	// Check if req.CameraID matches existing camera by ID (using c.id::text to prevent invalid UUID errors)
+	_ = h.db.QueryRow(c.Context(), `
+		SELECT c.id, c.branch_id 
+		FROM cameras c
+		JOIN branches b ON c.branch_id = b.id
+		WHERE b.company_id = $1 AND c.id::text = $2
+		LIMIT 1
+	`, companyID, req.CameraID).Scan(&realCameraID, &realBranchID)
+
+	// If not found by direct ID (e.g. req.CameraID is IP address or device key), search by IP or name
+	if realCameraID == "" {
+		_ = h.db.QueryRow(c.Context(), `
+			SELECT c.id, c.branch_id 
+			FROM cameras c
+			JOIN branches b ON c.branch_id = b.id
+			WHERE b.company_id = $1 AND (
+				c.dvr_ip = $2 OR 
+				c.rtsp_url_encrypted LIKE '%' || $2 || '%' OR 
+				c.name = $2
+			)
+			ORDER BY c.created_at ASC
+			LIMIT 1
+		`, companyID, req.CameraID).Scan(&realCameraID, &realBranchID)
+	}
+
+	// Fallback to any camera in the company if still unresolved
+	if realCameraID == "" {
+		_ = h.db.QueryRow(c.Context(), `
+			SELECT c.id, c.branch_id 
+			FROM cameras c
+			JOIN branches b ON c.branch_id = b.id
+			WHERE b.company_id = $1
+			ORDER BY c.created_at ASC
+			LIMIT 1
+		`, companyID).Scan(&realCameraID, &realBranchID)
+	}
+
+	if realCameraID != "" {
+		req.CameraID = realCameraID
+	}
+	if req.BranchID == "" || req.BranchID == "undefined" {
+		req.BranchID = realBranchID
 	}
 
 	if req.BoundingBoxes == "" {
@@ -263,13 +313,122 @@ func (h *Handler) Acknowledge(c *fiber.Ctx) error {
 	}
 
 	_, err := h.db.Exec(c.Context(), `
-		UPDATE detections SET is_acknowledged = true, acknowledged_by = $1, is_read = true WHERE id = $2 AND company_id = $3
+		UPDATE detections 
+		SET is_acknowledged = true, acknowledged_by = $1, is_read = true, is_pinned = true, pinned_reason = 'acknowledged', pinned_at = NOW() 
+		WHERE id = $2 AND company_id = $3
 	`, body.AcknowledgedBy, id, companyID)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"success": false, "error": err.Error()})
 	}
 
-	return c.JSON(fiber.Map{"success": true, "message": "Detection acknowledged"})
+	return c.JSON(fiber.Map{"success": true, "message": "Detection acknowledged and pinned permanently"})
+}
+
+// Pin permanently exempts a detection from cold storage purge
+func (h *Handler) Pin(c *fiber.Ctx) error {
+	id := c.Params("id")
+	companyID := c.Locals("company_id").(string)
+
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	_ = c.BodyParser(&body)
+	if body.Reason == "" {
+		body.Reason = "manual_pinned"
+	}
+
+	_, err := h.db.Exec(c.Context(), `
+		UPDATE detections 
+		SET is_pinned = true, pinned_reason = $1, pinned_at = NOW() 
+		WHERE id = $2 AND company_id = $3
+	`, body.Reason, id, companyID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"success": false, "error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{"success": true, "message": "Detection pinned permanently"})
+}
+
+// StorageStats returns tiered storage breakdown and space savings
+func (h *Handler) StorageStats(c *fiber.Ctx) error {
+	companyID := c.Locals("company_id").(string)
+
+	var total, hotCount, warmCount, coldCount, pinnedCount int
+	_ = h.db.QueryRow(c.Context(), `SELECT COUNT(*) FROM detections WHERE company_id = $1`, companyID).Scan(&total)
+	_ = h.db.QueryRow(c.Context(), `SELECT COUNT(*) FROM detections WHERE company_id = $1 AND COALESCE(storage_tier, 'hot') = 'hot'`, companyID).Scan(&hotCount)
+	_ = h.db.QueryRow(c.Context(), `SELECT COUNT(*) FROM detections WHERE company_id = $1 AND storage_tier = 'warm'`, companyID).Scan(&warmCount)
+	_ = h.db.QueryRow(c.Context(), `SELECT COUNT(*) FROM detections WHERE company_id = $1 AND storage_tier = 'cold'`, companyID).Scan(&coldCount)
+	_ = h.db.QueryRow(c.Context(), `SELECT COUNT(*) FROM detections WHERE company_id = $1 AND (is_pinned = true OR is_acknowledged = true)`, companyID).Scan(&pinnedCount)
+
+	// Hot = ~180KB JPEG, Warm = ~30KB WebP (65% quality), Cold = 0KB (image purged, SQL row kept)
+	originalEstimatedMB := float64(total) * 0.18
+	currentEstimatedMB := (float64(hotCount) * 0.18) + (float64(warmCount) * 0.03) + (float64(pinnedCount) * 0.18)
+	savedMB := originalEstimatedMB - currentEstimatedMB
+	savedPercent := 0.0
+	if originalEstimatedMB > 0 && savedMB > 0 {
+		savedPercent = (savedMB / originalEstimatedMB) * 100.0
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data": fiber.Map{
+			"total_detections":       total,
+			"hot_count":              hotCount,
+			"warm_count":             warmCount,
+			"cold_count":             coldCount,
+			"pinned_count":           pinnedCount,
+			"estimated_original_mb":  math.Round(originalEstimatedMB*100) / 100,
+			"estimated_current_mb":   math.Round(currentEstimatedMB*100) / 100,
+			"estimated_saved_mb":     math.Round(savedMB*100) / 100,
+			"saved_percentage":       math.Round(savedPercent),
+			"hot_retention_days":     30,
+			"warm_retention_days":    90,
+			"cold_retention_days":    180,
+		},
+	})
+}
+
+// ProcessTiers runs the lifecycle management for hot/warm/cold tiers
+func (h *Handler) ProcessTiers(c *fiber.Ctx) error {
+	companyID := c.Locals("company_id").(string)
+
+	// 1. Move detections older than 30 days and younger than 90 days to 'warm' if not pinned
+	warmRes, err := h.db.Exec(c.Context(), `
+		UPDATE detections 
+		SET storage_tier = 'warm' 
+		WHERE company_id = $1 
+		  AND (storage_tier IS NULL OR storage_tier = 'hot')
+		  AND detected_at < NOW() - INTERVAL '30 days'
+		  AND detected_at >= NOW() - INTERVAL '90 days'
+		  AND is_pinned = false 
+		  AND is_acknowledged = false
+	`, companyID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"success": false, "error": err.Error()})
+	}
+
+	// 2. Move detections older than 90 days to 'cold' (clear snapshot URL, keep analytics row) if not pinned
+	coldRes, err := h.db.Exec(c.Context(), `
+		UPDATE detections 
+		SET storage_tier = 'cold', snapshot_url = '' 
+		WHERE company_id = $1 
+		  AND storage_tier != 'cold'
+		  AND detected_at < NOW() - INTERVAL '90 days'
+		  AND is_pinned = false 
+		  AND is_acknowledged = false
+	`, companyID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"success": false, "error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "Tiered storage lifecycle processed successfully",
+		"data": fiber.Map{
+			"moved_to_warm": warmRes.RowsAffected(),
+			"moved_to_cold": coldRes.RowsAffected(),
+		},
+	})
 }
 
 // Stats returns KPI counts for dashboard

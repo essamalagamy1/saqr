@@ -1,14 +1,14 @@
 {
-  "version": "1.3.8",
+  "version": "1.3.11",
   "name": "Saqr Edge Agent",
   "releaseDate": "2026-11-19",
   "asarUrl": "/downloads/app.asar",
   "zipUrl": "/downloads/Saqr-Edge-Agent-Win64.zip",
   "changelog": [
-    "تحديث خوارزمية الذكاء الاصطناعي مع كاشف حركة ورصد فوري للأشخاص المتحركين أمام الكاميرا",
-    "تعديل حساسية الرصد وضبط التهديف ليتم التقاط أي شخص يمر أمام الكاميرا فوراً",
-    "حل مشكلة القنوات المتكررة وفصل الكاميرات المستقلة",
-    "إمكانية توسيع أجهزة NVR متعددة القنوات (16 قناة) بضغطة زر واحدة"
+    "إضافة ميزة الاتصال المباشر بأجهزة DVR / NVR (Hikvision ISAPI, Dahua CGI, ONVIF) وسحب واستيراد كافة القنوات المتصلة (16 أو 32 قناة) دفعة واحدة",
+    "تفعيل خاصية البث المزدوج الذكي (Dual Streaming): سحب مسار Sub-Stream الخفيف لمعالجة الذكاء الاصطناعي YOLOX وتوفير 80% من استهلاك المعالج مع توفير Main-Stream للقطات التوثيق",
+    "تكامل متكامل مع سياسة التخزين متدرج المراحل (Tiered Storage: Hot 30 days -> Warm WebP 90 days -> Cold Purge) مع التثبيت الدائم لمهام العمل والأدلة الرسمية",
+    "دعم استيراد قنوات الـ DVR واختيار الفرع مباشرة من تطبيق المراقبة الميداني ومنصة الويب"
   ],
-  "releaseNotes": "Fix: Enhanced YOLOX sensitivity for distant people + motion vision fallback; fixed duplicate NVR channel streams and updated server sync"
+  "releaseNotes": "v1.3.11: Direct DVR/NVR Auto-Discovery, Dual-Streaming AI Engine & Tiered Storage Lifecycle"
 }

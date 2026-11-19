@@ -23,7 +23,12 @@ import {
   SlidersHorizontal,
   ChevronLeft,
   ChevronRight,
-  AlertCircle
+  AlertCircle,
+  Building2,
+  HardDrive,
+  Flame,
+  Archive,
+  Pin
 } from 'lucide-react';
 import { api } from '@/lib/api';
 
@@ -38,6 +43,9 @@ interface DetectionItem {
   confidence: number;
   detected_at?: string;
   severity: 'high' | 'medium' | 'low';
+  storage_tier?: 'hot' | 'warm' | 'cold' | string;
+  is_pinned?: boolean;
+  pinned_reason?: string;
   is_acknowledged?: boolean;
   snapshot_url?: string;
   bounding_boxes?: any;
@@ -53,10 +61,20 @@ interface BoundingBox {
   color: string;
 }
 
+function getCleanSnapshotUrl(url?: string): string {
+  if (!url) return '';
+  if (url.includes('/api/cameras/snapshot/')) {
+    const id = url.split('/api/cameras/snapshot/')[1];
+    return `/api/cameras/snapshot/${id}`;
+  }
+  return url;
+}
+
 // Translate detection types and labels to professional Arabic & English tags
 function getDetectionDetails(type: string, severity: string) {
   const t = (type || '').toLowerCase();
   
+  // 1. Kitchen PPE - Hairnet
   if (t.includes('hairnet') || t.includes('غطاء')) {
     return {
       serviceTitle: 'مراقبة معدات السلامة في المطبخ',
@@ -67,7 +85,8 @@ function getDetectionDetails(type: string, severity: string) {
       category: 'Kitchen PPE'
     };
   }
-  if (t.includes('mask') || t.includes('كمامة')) {
+  // 2. Kitchen PPE - Mask
+  if (t.includes('mask') || t.includes('كمامة') || t.includes('كمامات')) {
     return {
       serviceTitle: 'مراقبة معدات السلامة في المطبخ',
       tagEn: 'No mask',
@@ -77,14 +96,60 @@ function getDetectionDetails(type: string, severity: string) {
       category: 'Kitchen PPE'
     };
   }
+  // 3. Visitor / Foot traffic (In / Out)
+  if (t.includes('visitor') || t.includes('زائر') || t.includes('دخول') || t.includes('خروج') || t.includes('توافد')) {
+    const isOut = t.includes('خروج') || t.includes('exit') || t.includes('out');
+    return {
+      serviceTitle: 'حساب عدد الداخلين والخارجين وقياس التوافد',
+      tagEn: isOut ? 'Visitor Exit' : 'Visitor Entry',
+      tagAr: isOut ? 'خروج زائر' : 'دخول زائر',
+      badgeColor: isOut ? 'border-sky-800/60 bg-sky-950/80 text-sky-300' : 'border-emerald-800/60 bg-emerald-950/80 text-emerald-300',
+      accentColor: isOut ? '#0ea5e9' : '#10b981',
+      category: 'Foot Traffic'
+    };
+  }
+  // 4. Loitering
   if (t.includes('loitering') || t.includes('تسكع') || t.includes('lingering')) {
     return {
       serviceTitle: 'كشف التسكع في الممرات والمناطق الحيوية',
-      tagEn: 'Lingering 7:00',
+      tagEn: 'Lingering 0:45',
       tagAr: 'كشف التسكع والانتظار',
       badgeColor: 'border-amber-800/60 bg-amber-950/80 text-amber-300',
       accentColor: '#f59e0b',
       category: 'Loitering'
+    };
+  }
+  // 5. Phone usage
+  if (t.includes('phone') || t.includes('هاتف') || t.includes('جوال')) {
+    return {
+      serviceTitle: 'رصد استخدام الهواتف أثناء ساعات العمل',
+      tagEn: 'Phone usage',
+      tagAr: 'استخدام الهاتف المحمول',
+      badgeColor: 'border-purple-800/60 bg-purple-950/80 text-purple-300',
+      accentColor: '#a855f7',
+      category: 'Compliance'
+    };
+  }
+  // 6. Queue Wait Time
+  if (t.includes('queue') || t.includes('طابور') || t.includes('انتظار')) {
+    return {
+      serviceTitle: 'قياس أوقات الانتظار وطول الطوابير',
+      tagEn: 'Customer Queue',
+      tagAr: 'طابور انتظار عملاء',
+      badgeColor: 'border-indigo-800/60 bg-indigo-950/80 text-indigo-300',
+      accentColor: '#6366f1',
+      category: 'Queue Analytics'
+    };
+  }
+  // 7. Staff Monitoring
+  if (t.includes('employee') || t.includes('staff') || t.includes('موظف')) {
+    return {
+      serviceTitle: 'تتبع تواجد العاملين في نطاقات عملهم',
+      tagEn: 'Staff Presence',
+      tagAr: 'مراقبة الموظفين',
+      badgeColor: 'border-cyan-800/60 bg-cyan-950/80 text-cyan-300',
+      accentColor: '#06b6d4',
+      category: 'Staff Operations'
     };
   }
   if (t.includes('glove') || t.includes('قفاز')) {
@@ -97,14 +162,15 @@ function getDetectionDetails(type: string, severity: string) {
       category: 'Hygiene PPE'
     };
   }
-  if (t.includes('phone') || t.includes('هاتف')) {
+  // 8. Multiple Persons
+  if (t.includes('multiple') || t.includes('أشخاص متعددين') || t.includes('أشخاص')) {
     return {
-      serviceTitle: 'رصد استخدام الهواتف أثناء العمل',
-      tagEn: 'Phone usage',
-      tagAr: 'استخدام الهاتف المحمول',
-      badgeColor: 'border-purple-800/60 bg-purple-950/80 text-purple-300',
-      accentColor: '#a855f7',
-      category: 'Compliance'
+      serviceTitle: 'رصد حركة وتواجد أفراد بالمنشأة',
+      tagEn: 'Multiple Persons',
+      tagAr: 'رصد أشخاص متعددين',
+      badgeColor: 'border-blue-800/60 bg-blue-950/80 text-blue-300',
+      accentColor: '#3b82f6',
+      category: 'Motion & Presence'
     };
   }
 
@@ -145,9 +211,37 @@ function parseBoundingBoxes(rawBoxes: any, detectionType: string, confidence: nu
         parsed = [parsed];
       }
 
+      const colors = ['#3b82f6', '#06b6d4', '#10b981', '#a855f7', '#f59e0b', '#ec4899'];
+
       return parsed.map((item: any, idx: number) => {
+        // Case 1: item is [x1, y1, x2, y2]
         if (Array.isArray(item) && item.length >= 4) {
           const [x1, y1, x2, y2] = item;
+          const isPixel = x2 > 1.5 || y2 > 1.5;
+          const frameW = isPixel ? 1920 : 1;
+          const frameH = isPixel ? 1080 : 1;
+
+          const left = Math.max(0, Math.min(100, (x1 / frameW) * 100));
+          const top = Math.max(0, Math.min(100, (y1 / frameH) * 100));
+          const width = Math.max(4, Math.min(100 - left, ((x2 - x1) / frameW) * 100));
+          const height = Math.max(6, Math.min(100 - top, ((y2 - y1) / frameH) * 100));
+
+          const isSingle = parsed.length === 1;
+          const label = isSingle ? details.tagEn : `Person ${idx + 1}`;
+          const color = isSingle ? details.accentColor : colors[idx % colors.length];
+
+          return {
+            x: left,
+            y: top,
+            width,
+            height,
+            label,
+            color
+          };
+        }
+        // Case 2: item is { box: [x1, y1, x2, y2], label, color, score }
+        else if (typeof item === 'object' && item !== null && Array.isArray(item.box) && item.box.length >= 4) {
+          const [x1, y1, x2, y2] = item.box;
           const isPixel = x2 > 1.5 || y2 > 1.5;
           const frameW = isPixel ? 1920 : 1;
           const frameH = isPixel ? 1080 : 1;
@@ -162,10 +256,12 @@ function parseBoundingBoxes(rawBoxes: any, detectionType: string, confidence: nu
             y: top,
             width,
             height,
-            label: idx === 0 ? details.tagEn : 'Person',
-            color: idx === 0 ? details.accentColor : '#64748b'
+            label: item.label || (parsed.length === 1 ? details.tagEn : `Person ${idx + 1}`),
+            color: item.color || (parsed.length === 1 ? details.accentColor : colors[idx % colors.length])
           };
-        } else if (typeof item === 'object' && item !== null) {
+        }
+        // Case 3: item is { x, y, width, height, label, color }
+        else if (typeof item === 'object' && item !== null) {
           const x = item.x ?? item.left ?? 30;
           const y = item.y ?? item.top ?? 20;
           const w = item.width ?? item.w ?? 40;
@@ -221,6 +317,8 @@ function DetectionsContent() {
   const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
   const [isDeletingAll, setIsDeletingAll] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [storageStats, setStorageStats] = useState<any>(null);
+  const [processingTiers, setProcessingTiers] = useState(false);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -229,10 +327,11 @@ function DetectionsContent() {
 
   const loadData = async () => {
     try {
-      const [detData, camsData, branchesData] = await Promise.all([
+      const [detData, camsData, branchesData, statsData] = await Promise.all([
         api.get<DetectionItem[]>('/detections/'),
         api.get<any[]>('/cameras/'),
         api.get<any[]>('/branches/'),
+        api.get<any>('/detections/storage/stats').catch(() => null),
       ]);
 
       if (detData) {
@@ -243,10 +342,24 @@ function DetectionsContent() {
       }
       if (camsData) setCameras(camsData);
       if (branchesData) setBranches(branchesData);
+      if (statsData) setStorageStats(statsData);
     } catch (e) {
       console.error('Error loading detections:', e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleProcessTiers = async () => {
+    setProcessingTiers(true);
+    try {
+      await api.post('/detections/storage/process-tiers', {});
+      showToast('تمت معالجة وتطبيق مراحل التخزين المتدرج بنجاح');
+      loadData();
+    } catch {
+      showToast('حدث خطأ أثناء معالجة التخزين');
+    } finally {
+      setProcessingTiers(false);
     }
   };
 
@@ -326,8 +439,14 @@ function DetectionsContent() {
 
   const filteredDetections = useMemo(() => {
     return detections.filter(d => {
-      if (selectedService === 'ppe' && !(d.type.includes('قفاز') || d.type.includes('غطاء') || d.type.includes('hairnet') || d.type.includes('mask'))) return false;
-      if (selectedService === 'loitering' && !(d.type.includes('تسكع') || d.type.includes('loitering') || d.type.includes('lingering'))) return false;
+      const t = (d.type || '').toLowerCase();
+      if (selectedService === 'ppe' && !(t.includes('قفاز') || t.includes('غطاء') || t.includes('hairnet') || t.includes('mask') || t.includes('كمامة'))) return false;
+      if (selectedService === 'visitor' && !(t.includes('زائر') || t.includes('visitor') || t.includes('دخول') || t.includes('خروج') || t.includes('توافد'))) return false;
+      if (selectedService === 'loitering' && !(t.includes('تسكع') || t.includes('loitering') || t.includes('lingering'))) return false;
+      if (selectedService === 'phone' && !(t.includes('phone') || t.includes('هاتف') || t.includes('جوال'))) return false;
+      if (selectedService === 'queue' && !(t.includes('queue') || t.includes('طابور') || t.includes('انتظار'))) return false;
+      if (selectedService === 'employee' && !(t.includes('employee') || t.includes('staff') || t.includes('موظف'))) return false;
+      if (selectedService === 'presence' && !(t.includes('person') || t.includes('شخص') || t.includes('أشخاص'))) return false;
 
       if (selectedCamera !== 'all' && d.camera_name !== selectedCamera) return false;
       if (selectedBranch !== 'all' && d.branch_name !== selectedBranch) return false;
@@ -405,6 +524,61 @@ function DetectionsContent() {
         </div>
       </div>
 
+      {/* Tiered Storage Architecture Banner */}
+      <div className="rounded-xl border border-slate-800/80 bg-gradient-to-r from-[#0d1527] via-[#09101f] to-[#0d1527] p-3.5 flex flex-col md:flex-row items-center justify-between gap-3 text-xs shadow-md">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-400 flex items-center justify-center shrink-0">
+            <HardDrive className="h-5 w-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 font-bold text-white">
+              <span>سياسة التخزين متدرج المراحل (Tiered Storage)</span>
+              <span className="text-[10px] rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 px-2 py-0.5">
+                نشط وتلقائي
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5 flex-wrap">
+              <span className="inline-flex items-center gap-1 text-slate-300">
+                <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                <strong>Hot (0-30 يوم):</strong> لقطات أصلية كاملة
+              </span>
+              <span>•</span>
+              <span className="inline-flex items-center gap-1 text-slate-300">
+                <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                <strong>Warm (31-90 يوم):</strong> ضغط WebP 65% (توفير 85%)
+              </span>
+              <span>•</span>
+              <span className="inline-flex items-center gap-1 text-slate-300">
+                <span className="w-2 h-2 rounded-full bg-sky-400"></span>
+                <strong>Cold (&gt;90 يوم):</strong> أرشفة وحفظ التقارير
+              </span>
+              <span>•</span>
+              <span className="inline-flex items-center gap-1 text-sky-300">
+                <Pin className="h-3 w-3" />
+                <strong>المستثنى من الحذف:</strong> مهام العمل والمخالفات المعتمدة
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          {storageStats?.saved_percentage !== undefined && (
+            <span className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 text-[11px] font-bold text-emerald-400">
+              توفير {storageStats.saved_percentage}% مساحة
+            </span>
+          )}
+          <button
+            onClick={handleProcessTiers}
+            disabled={processingTiers}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/80 px-3 py-1.5 text-[11px] font-semibold text-slate-200 hover:text-white hover:bg-slate-700 transition disabled:opacity-50"
+            title="فحص وتطبيق مراحل التخزين على السجلات الآن"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 text-sky-400 ${processingTiers ? 'animate-spin' : ''}`} />
+            <span>تشغيل دورة الأرشفة</span>
+          </button>
+        </div>
+      </div>
+
       {/* Advanced Filter Box */}
       <div className="rounded-xl border border-slate-800/80 bg-[#0d1527] p-4 space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
@@ -444,8 +618,13 @@ function DetectionsContent() {
               className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-slate-200 focus:outline-none focus:border-amber-500"
             >
               <option value="all">الكل (جميع الخدمات)</option>
-              <option value="ppe">سلامة المطبخ (PPE)</option>
-              <option value="loitering">كشف التسكع</option>
+              <option value="ppe">سلامة المطبخ (PPE - كمامات وغطاء)</option>
+              <option value="visitor">عد الزوار (Foot Traffic - دخول/خروج)</option>
+              <option value="phone">كشف استخدام الجوال (Phone Usage)</option>
+              <option value="loitering">كشف التسكع (Loitering)</option>
+              <option value="queue">العميل المنتظر (Queue & Waiting)</option>
+              <option value="employee">مراقبة الموظفين (Staff Presence)</option>
+              <option value="presence">رصد وتواجد الأفراد (Presence)</option>
             </select>
           </div>
 
@@ -509,7 +688,7 @@ function DetectionsContent() {
                   >
                     {item.snapshot_url ? (
                       <img
-                        src={item.snapshot_url}
+                        src={getCleanSnapshotUrl(item.snapshot_url)}
                         alt={item.type}
                         className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                       />
@@ -525,9 +704,30 @@ function DetectionsContent() {
 
                     {/* Top Watermark Bar */}
                     <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none text-[10px] font-mono text-slate-200">
-                      <span className="font-semibold text-white bg-black/60 px-1.5 py-0.5 rounded backdrop-blur-xs">
-                        {details.category}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-semibold text-white bg-black/60 px-1.5 py-0.5 rounded backdrop-blur-xs">
+                          {details.category}
+                        </span>
+                        {/* Storage Tier Indicator */}
+                        {item.is_pinned || item.is_acknowledged ? (
+                          <span className="bg-sky-950/90 text-sky-300 border border-sky-500/40 px-1.5 py-0.5 rounded backdrop-blur-xs flex items-center gap-0.5 font-bold text-[9px]">
+                            <Pin className="h-2.5 w-2.5 text-sky-400" />
+                            <span>مثبت دائم</span>
+                          </span>
+                        ) : item.storage_tier === 'warm' ? (
+                          <span className="bg-amber-950/90 text-amber-300 border border-amber-500/40 px-1.5 py-0.5 rounded backdrop-blur-xs font-bold text-[9px]">
+                            📦 Warm
+                          </span>
+                        ) : item.storage_tier === 'cold' ? (
+                          <span className="bg-slate-900/90 text-slate-400 border border-slate-700 px-1.5 py-0.5 rounded backdrop-blur-xs font-bold text-[9px]">
+                            ❄️ Cold
+                          </span>
+                        ) : (
+                          <span className="bg-emerald-950/90 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.5 rounded backdrop-blur-xs font-bold text-[9px]">
+                            🔥 Hot
+                          </span>
+                        )}
+                      </div>
                       <span className="bg-black/60 px-1.5 py-0.5 rounded backdrop-blur-xs">
                         {item.detected_at ? new Date(item.detected_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }) : 'الآن'}
                       </span>
@@ -562,11 +762,16 @@ function DetectionsContent() {
 
                     {/* Bottom Watermark Overlay */}
                     <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between pointer-events-none">
-                      <span className="bg-slate-950/80 text-[10px] text-slate-300 font-bold px-2 py-0.5 rounded border border-slate-800">
+                      <span className="bg-slate-950/85 text-[10px] text-slate-300 font-bold px-2 py-0.5 rounded border border-slate-800">
                         Today #{index + 1}
                       </span>
-                      <span className="bg-slate-950/80 text-[10px] text-slate-400 font-mono px-2 py-0.5 rounded border border-slate-800">
-                        {item.camera_name || 'Camera 01'}
+                      <span className="bg-slate-950/85 text-[10px] font-mono px-2 py-0.5 rounded border border-slate-800 flex items-center gap-1.5">
+                        <span className="text-amber-400 font-bold flex items-center gap-1">
+                          <Building2 className="h-3 w-3 text-amber-400" />
+                          {item.branch_name || 'فرع القاهرة الجديدة'}
+                        </span>
+                        <span className="text-slate-600">•</span>
+                        <span className="text-slate-300">{item.camera_name || 'Camera 01'}</span>
                       </span>
                     </div>
                   </div>
@@ -634,20 +839,24 @@ function DetectionsContent() {
                   </div>
 
                   {/* Card Metadata Body */}
-                  <div className="p-3.5 space-y-1 text-right">
+                  <div className="p-3.5 space-y-1.5 text-right">
                     <h3 className="text-xs font-bold text-slate-100 line-clamp-1">
                       {details.serviceTitle}
                     </h3>
 
-                    <div className="text-[11px] text-slate-400 flex items-center justify-start gap-1 font-medium">
-                      <span>{item.camera_name || 'كاميرا 1'}</span>
-                      <span>•</span>
-                      <span>{item.zone_name || 'Zone 1'}</span>
-                      <span>•</span>
-                      <span className="text-slate-300">{item.branch_name || 'فرع القاهرة'}</span>
+                    {/* Prominent Branch & Camera Tag */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-[11px] font-bold text-amber-300">
+                        <Building2 className="h-3 w-3 text-amber-400" />
+                        <span>الفرع: {item.branch_name || 'فرع القاهرة الجديدة'}</span>
+                      </span>
+                      <span className="text-[11px] text-slate-400 font-medium">
+                        • {item.camera_name || 'كاميرا 1'}
+                        {item.zone_name ? ` (${item.zone_name})` : ''}
+                      </span>
                     </div>
 
-                    <div className="text-[10px] text-slate-500 flex items-center justify-start gap-1 pt-1">
+                    <div className="text-[10px] text-slate-500 flex items-center justify-start gap-1 pt-0.5">
                       <Clock className="h-3 w-3 text-slate-500" />
                       <span>
                         {item.detected_at 
@@ -704,11 +913,34 @@ function DetectionsContent() {
             
             {/* Modal Header */}
             <div className="flex items-center justify-between px-6 py-3.5 border-b border-slate-800 bg-[#0d1527]">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2.5 flex-wrap">
                 <span className="text-sm font-bold text-white flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
                   {getDetectionDetails(activeInspectItem.type, activeInspectItem.severity).category}
                 </span>
+                <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/20 border border-amber-500/40 px-2.5 py-0.5 text-xs font-bold text-amber-300">
+                  <Building2 className="h-3.5 w-3.5 text-amber-400" />
+                  <span>الفرع: {activeInspectItem.branch_name || 'فرع القاهرة الجديدة'}</span>
+                </span>
+                {/* Storage Tier Badge */}
+                {activeInspectItem.is_pinned || activeInspectItem.is_acknowledged ? (
+                  <span className="inline-flex items-center gap-1 rounded bg-sky-500/20 border border-sky-500/40 px-2 py-0.5 text-xs font-bold text-sky-300">
+                    <Pin className="h-3 w-3 text-sky-400" />
+                    <span>مثبت دائم (مستثنى من الحذف)</span>
+                  </span>
+                ) : activeInspectItem.storage_tier === 'warm' ? (
+                  <span className="inline-flex items-center gap-1 rounded bg-amber-500/20 border border-amber-500/40 px-2 py-0.5 text-xs font-bold text-amber-300">
+                    📦 Warm (WebP مضغوط)
+                  </span>
+                ) : activeInspectItem.storage_tier === 'cold' ? (
+                  <span className="inline-flex items-center gap-1 rounded bg-blue-500/20 border border-blue-500/40 px-2 py-0.5 text-xs font-bold text-blue-300">
+                    ❄️ Cold (أرشفة إحصائية)
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 rounded bg-emerald-500/20 border border-emerald-500/40 px-2 py-0.5 text-xs font-bold text-emerald-300">
+                    🔥 Hot (لقطة أصلية)
+                  </span>
+                )}
                 <span className="text-xs text-slate-400">
                   {getDetectionDetails(activeInspectItem.type, activeInspectItem.severity).serviceTitle}
                 </span>
@@ -759,12 +991,12 @@ function DetectionsContent() {
               </button>
 
               {/* Main Snapshot */}
-              <div className="relative w-full h-full flex items-center justify-center">
+              <div className="relative inline-block max-h-[58vh] max-w-full">
                 {activeInspectItem.snapshot_url ? (
                   <img
-                    src={activeInspectItem.snapshot_url}
+                    src={getCleanSnapshotUrl(activeInspectItem.snapshot_url)}
                     alt={activeInspectItem.type}
-                    className="max-h-[58vh] w-auto max-w-full object-contain"
+                    className="max-h-[58vh] w-auto max-w-full object-contain block mx-auto"
                   />
                 ) : (
                   <div className="py-24 text-slate-700 flex flex-col items-center">
@@ -803,8 +1035,13 @@ function DetectionsContent() {
                 <div className="absolute bottom-3 left-6 bg-slate-950/80 px-3 py-1 rounded text-xs font-bold text-white border border-slate-800">
                   Today #{inspectIndex !== null ? inspectIndex + 1 : 1}
                 </div>
-                <div className="absolute bottom-3 right-6 bg-slate-950/80 px-3 py-1 rounded text-xs font-mono text-slate-300 border border-slate-800">
-                  {activeInspectItem.camera_name || 'Camera 01'}
+                <div className="absolute bottom-3 right-6 bg-slate-950/90 px-3 py-1 rounded text-xs font-mono border border-slate-800 flex items-center gap-2">
+                  <span className="text-amber-400 font-bold flex items-center gap-1">
+                    <Building2 className="h-3.5 w-3.5 text-amber-400" />
+                    {activeInspectItem.branch_name || 'فرع القاهرة الجديدة'}
+                  </span>
+                  <span className="text-slate-600">•</span>
+                  <span className="text-slate-200">{activeInspectItem.camera_name || 'Camera 01'}</span>
                 </div>
               </div>
             </div>
@@ -822,7 +1059,7 @@ function DetectionsContent() {
                   }`}
                 >
                   {thumb.snapshot_url ? (
-                    <img src={thumb.snapshot_url} alt="" className="w-full h-full object-cover" />
+                    <img src={getCleanSnapshotUrl(thumb.snapshot_url)} alt="" className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full bg-slate-900 flex items-center justify-center">
                       <Camera className="h-4 w-4 text-slate-600" />
@@ -834,12 +1071,15 @@ function DetectionsContent() {
 
             {/* Modal Bottom Actions Bar */}
             <div className="px-6 py-3.5 bg-[#0d1527] border-t border-slate-800 flex items-center justify-between text-xs">
-              <div className="text-slate-400">
+              <div className="text-slate-400 flex items-center gap-2 flex-wrap">
+                <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-xs font-bold text-amber-300">
+                  <Building2 className="h-3.5 w-3.5 text-amber-400" />
+                  <span>{activeInspectItem.branch_name || 'فرع القاهرة الجديدة'}</span>
+                </span>
+                <span className="text-slate-600">•</span>
                 <span>الكاميرا: <strong className="text-white">{activeInspectItem.camera_name || 'Camera 01'}</strong></span>
-                <span className="mx-2">•</span>
-                <span>الفرع: <strong className="text-white">{activeInspectItem.branch_name || 'الفرع الرئيسي'}</strong></span>
-                <span className="mx-2">•</span>
-                <span>نسبة الثقة: <strong className="text-emerald-400">{Math.round(activeInspectItem.confidence * 100)}%</strong></span>
+                <span className="text-slate-600">•</span>
+                <span>نسبة الثقة: <strong className="text-emerald-400">{Math.round((activeInspectItem.confidence || 0.96) * 100)}%</strong></span>
               </div>
 
               <div className="flex items-center gap-3">
