@@ -1,5 +1,5 @@
 {
-  "version": "1.3.3",
+  "version": "1.3.4",
   "name": "Saqr Edge Agent",
   "releaseDate": "2026-11-19",
   "asarUrl": "/downloads/app.asar",
@@ -8,5 +8,6 @@
     "تثبيت واستقرار البث المباشر (Flicker-Free Double Buffering) والتخلص نهائياً من وميض الشاشة أو اختفاء الصورة",
     "تصفية الإطارات التالفة من FFmpeg ومنع الإطارات الرمادية غير المكتملة عبر التحقق من Keyframes (I-frames)",
     "استقرار تدفق الفيديو بدقة HD كاملة في شبكة الكاميرات وشاشة التكبير"
-  ]
+  ],
+  "releaseNotes": "Fix: Detection snapshots now show real camera frames instead of placeholder images"
 }
