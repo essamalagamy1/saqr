@@ -145,8 +145,12 @@ func (h *Handler) Ingest(c *fiber.Ctx) error {
 	companyID := c.Locals("company_id").(string)
 
 	var req CreateDetectionRequest
-	if err := c.BodyParser(&req); err != nil || req.CameraID == "" || req.BranchID == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"success": false, "error": "Invalid detection payload"})
+	if err := c.BodyParser(&req); err != nil || req.CameraID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"success": false, "error": "Invalid detection payload: camera_id is required"})
+	}
+
+	if req.BranchID == "" {
+		_ = h.db.QueryRow(c.Context(), `SELECT branch_id FROM cameras WHERE id = $1`, req.CameraID).Scan(&req.BranchID)
 	}
 
 	if req.BoundingBoxes == "" {
@@ -290,5 +294,37 @@ func (h *Handler) Stats(c *fiber.Ctx) error {
 			"active_cameras":    activeCameras,
 			"active_services":   activeServices,
 		},
+	})
+}
+
+// Delete removes a single detection by ID
+func (h *Handler) Delete(c *fiber.Ctx) error {
+	id := c.Params("id")
+	companyID := c.Locals("company_id").(string)
+
+	res, err := h.db.Exec(c.Context(), `DELETE FROM detections WHERE id = $1 AND company_id = $2`, id, companyID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"success": false, "error": err.Error()})
+	}
+	if res.RowsAffected() == 0 {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"success": false, "error": "Detection not found"})
+	}
+
+	return c.JSON(fiber.Map{"success": true, "message": "Detection deleted successfully"})
+}
+
+// DeleteAll removes all detections for the company
+func (h *Handler) DeleteAll(c *fiber.Ctx) error {
+	companyID := c.Locals("company_id").(string)
+
+	res, err := h.db.Exec(c.Context(), `DELETE FROM detections WHERE company_id = $1`, companyID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"success": false, "error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"deleted": res.RowsAffected(),
+		"message": "All detections deleted successfully",
 	})
 }

@@ -77,6 +77,8 @@ func SetupRoutes(app *fiber.App, db *pgxpool.Pool, redisClient *redis.Client, no
 	detectGroup.Get("/stats", detectHandler.Stats)
 	detectGroup.Patch("/:id/read", detectHandler.MarkAsRead)
 	detectGroup.Patch("/:id/acknowledge", detectHandler.Acknowledge)
+	detectGroup.Delete("/all", detectHandler.DeleteAll)
+	detectGroup.Delete("/:id", detectHandler.Delete)
 
 	// Real-time Event Stream (SSE)
 	eventsHandler := events.NewHandler(redisClient)

@@ -210,7 +210,7 @@ class AgentRunner {
         const event = {
           camera_id: camera.id,
           camera_name: camera.name,
-          branch_id: camera.branchId || '',
+          branch_id: camera.branchId || camera.branch_id || '',
           ai_service_slug: 'object_detection',
           type: `${det.label} detected`,
           severity: det.label === 'person' ? 'low' : 'medium',
