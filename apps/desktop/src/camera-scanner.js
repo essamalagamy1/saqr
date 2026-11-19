@@ -278,8 +278,8 @@ class CameraScanner {
         }
       });
 
-      // 3. Fast Parallel TCP Port 554 Sweep on Subnet
-      const checkPort = (ip, port = 554, timeout = 350) => {
+      // 3. Parallel TCP Port 554 & 8000 Sweep on Subnet
+      const checkPort = (ip, port = 554, timeout = 750) => {
         return new Promise(resolve => {
           const s = new net.Socket();
           s.setTimeout(timeout);
@@ -297,10 +297,12 @@ class CameraScanner {
         for (let i = 1; i <= 254; i++) {
           const targetIp = `${prefix}.${i}`;
           sweepTasks.push(async () => {
-            const isOpen = await checkPort(targetIp);
-            if (isOpen) {
+            // Check RTSP port 554, or Hikvision SDK port 8000
+            const isOpen554 = await checkPort(targetIp, 554, 750);
+            const isOpen8000 = !isOpen554 ? await checkPort(targetIp, 8000, 750) : false;
+
+            if (isOpen554 || isOpen8000) {
               // Immediately send direct UNICAST SADP UDP probe to targetIp:37020
-              // Unicast UDP is never dropped by Wi-Fi multicast filtering!
               if (sadpSocket) {
                 try {
                   sadpSocket.send(sadpMsg, 37020, targetIp);
