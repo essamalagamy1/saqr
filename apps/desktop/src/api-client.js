@@ -165,6 +165,37 @@ class ApiClient {
     }
   }
 
+  /**
+   * Upload a detection snapshot frame and return the hosted URL.
+   * @param {string} snapshotId - unique ID for this detection snapshot
+   * @param {Buffer} frameBuffer - raw JPEG bytes
+   * @returns {Promise<string|null>} hosted snapshot URL or null on failure
+   */
+  async uploadSnapshot(snapshotId, frameBuffer) {
+    if (!frameBuffer || frameBuffer.length < 500) return null;
+    try {
+      let cleanServer = this.serverUrl.replace(/\/api\/v1\/?$/, '').replace(/\/+$/, '');
+      if (cleanServer.includes(':8080')) {
+        cleanServer = cleanServer.replace(':8080', ':3000');
+      }
+      const url = `${cleanServer}/api/cameras/snapshot`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'x-snapshot-id': snapshotId,
+        },
+        body: frameBuffer,
+        timeout: 8000,
+      });
+      if (!res.ok) return null;
+      const json = await res.json();
+      return json.url || null;
+    } catch {
+      return null;
+    }
+  }
+
   async postDetection(detection) {
     const res = await fetch(`${this.baseUrl}/detections/ingest`, {
       method: 'POST',

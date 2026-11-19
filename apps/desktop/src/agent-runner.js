@@ -117,6 +117,13 @@ class AgentRunner {
 
       // Build detection event
       for (const det of detections) {
+        // Upload a frozen snapshot of this exact frame for the detection card
+        let snapshotUrl = null;
+        if (this.apiClient && frameBuffer && frameBuffer.length > 500) {
+          const snapshotId = `${camera.id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+          snapshotUrl = await this.apiClient.uploadSnapshot(snapshotId, frameBuffer);
+        }
+
         const event = {
           camera_id: camera.id,
           camera_name: camera.name,
@@ -126,7 +133,7 @@ class AgentRunner {
           severity: det.label === 'person' ? 'low' : 'medium',
           confidence: det.score,
           bounding_boxes: JSON.stringify([det.box]),
-          snapshot_url: 'https://images.unsplash.com/photo-1556910103-1c02745aae4d?auto=format&fit=crop&w=600&q=80',
+          snapshot_url: snapshotUrl || null,
           metadata: JSON.stringify({
             class: det.label,
             classId: det.classId,
