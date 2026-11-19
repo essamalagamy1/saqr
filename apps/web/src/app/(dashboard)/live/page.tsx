@@ -6,6 +6,7 @@ import {
   Camera as CameraIcon, AlertCircle, Sparkles, ShieldCheck, Eye, EyeOff, Loader2, Camera, Download, Check
 } from 'lucide-react';
 import { api } from '@/lib/api';
+import { LiveStreamPlayer } from '@/components/dashboard/live-stream-player';
 
 interface CameraItem {
   id: string;
@@ -183,12 +184,15 @@ export default function LiveFeedsPage() {
 
               {/* Video Viewport / Canvas Player */}
               <div className="relative aspect-video w-full bg-[#050811] flex items-center justify-center overflow-hidden cursor-pointer" onClick={() => setActiveModalCam(cam)}>
-                {/* Live Real-Time Image Stream */}
-                <img
-                  src={getStreamUrl(cam)}
-                  alt={cam.name}
-                  className="w-full h-full object-cover select-none"
-                  loading="lazy"
+                {/* Live Real-Time Image Stream with Double Buffering (Flicker-Free) */}
+                <LiveStreamPlayer
+                  cameraId={cam.id}
+                  cameraName={cam.name}
+                  ip={getCameraIp(cam)}
+                  channel={cam.dvr_channel || `CH${idx + 1}`}
+                  objectFit="cover"
+                  className="w-full h-full select-none"
+                  intervalMs={1500}
                 />
 
                 {/* Overlays / AI HUD */}
@@ -270,10 +274,14 @@ export default function LiveFeedsPage() {
 
             {/* Video Player Display */}
             <div className="relative aspect-video w-full bg-black flex items-center justify-center overflow-hidden border-b border-slate-800">
-              <img
-                src={getStreamUrl(activeModalCam)}
-                alt={activeModalCam.name}
-                className="w-full h-full object-contain select-none"
+              <LiveStreamPlayer
+                cameraId={activeModalCam.id}
+                cameraName={activeModalCam.name}
+                ip={getCameraIp(activeModalCam)}
+                channel={activeModalCam.dvr_channel || 'CH1'}
+                objectFit="contain"
+                className="w-full h-full select-none"
+                intervalMs={1200}
               />
 
               {/* Live Overlay HUD */}

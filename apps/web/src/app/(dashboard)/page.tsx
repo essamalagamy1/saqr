@@ -22,6 +22,7 @@ import {
   Video
 } from 'lucide-react';
 import { api } from '@/lib/api';
+import { LiveStreamPlayer } from '@/components/dashboard/live-stream-player';
 
 export default function DashboardPage() {
   const [stats, setStats] = useState({
@@ -273,11 +274,14 @@ export default function DashboardPage() {
                     </span>
                   </div>
                   <div className="relative aspect-video w-full flex items-center justify-center overflow-hidden bg-black">
-                    <img
-                      src={`/api/cameras/${cam.id}/frame?ip=${encodeURIComponent(ip)}&ch=${encodeURIComponent(ch)}&t=${frameTick}`}
-                      alt={cam.name}
-                      className="w-full h-full object-cover select-none"
-                      loading="lazy"
+                    <LiveStreamPlayer
+                      cameraId={cam.id}
+                      cameraName={cam.name}
+                      ip={ip}
+                      channel={ch}
+                      objectFit="cover"
+                      className="w-full h-full select-none"
+                      intervalMs={1800}
                     />
                     <div className="absolute top-2 right-2 text-[9px] font-mono text-emerald-400 bg-black/85 px-1.5 py-0.5 rounded border border-emerald-500/30 flex items-center gap-1 shadow pointer-events-none">
                       <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" />

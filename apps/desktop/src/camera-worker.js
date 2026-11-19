@@ -121,8 +121,11 @@ class CameraWorker {
       const ffmpegExe = resolveFfmpegPath();
       const args = [
         '-rtsp_transport', 'tcp',
-        '-analyzeduration', '1000000',
-        '-probesize', '1000000',
+        '-fflags', '+discardcorrupt+nobuffer',
+        '-flags', 'low_delay',
+        '-skip_frame', 'nokey',
+        '-analyzeduration', '2000000',
+        '-probesize', '2000000',
         '-i', rtspUrl,
         '-frames:v', '1',
         '-q:v', '2',
@@ -154,7 +157,12 @@ class CameraWorker {
       proc.on('close', (code) => {
         clearTimeout(timer);
         if (code === 0 && chunks.length > 0) {
-          resolve(Buffer.concat(chunks));
+          const buffer = Buffer.concat(chunks);
+          if (buffer.length > 3000) {
+            resolve(buffer);
+          } else {
+            reject(new Error('إطار غير مكتمل أو تالف (Corrupted / incomplete frame)'));
+          }
         } else {
           reject(new Error(`توقف محرك الفيديو بكود (${code}): ${stderr.slice(-200)}`));
         }

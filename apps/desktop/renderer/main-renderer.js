@@ -71,8 +71,10 @@ function setAgentUI(running) {
 async function loadCameras() {
   const cameras = await rased.cameras.list();
   const list = document.getElementById('cameraList');
-  document.getElementById('cameraBadge').textContent = cameras.length;
-  document.getElementById('statCameras').textContent = cameras.filter(c => c.enabled).length;
+  const camBadge = document.getElementById('cameraBadge');
+  if (camBadge) camBadge.textContent = cameras.length;
+  const statCams = document.getElementById('statCameras');
+  if (statCams) statCams.textContent = cameras.filter(c => c.enabled).length;
 
   if (cameras.length === 0) {
     list.innerHTML = `
@@ -473,14 +475,18 @@ document.addEventListener('change', async (e) => {
 function addDetectionToFeed(event) {
   framesCounter++;
   sentCounter++;
-  document.getElementById('statFrames').textContent = framesCounter;
-  document.getElementById('statSent').textContent = sentCounter;
+  const elFrames = document.getElementById('statFrames');
+  if (elFrames) elFrames.textContent = framesCounter;
+  const elSent = document.getElementById('statSent');
+  if (elSent) elSent.textContent = sentCounter;
 
   detectionsList.unshift(event);
   if (detectionsList.length > 100) detectionsList.pop();
 
-  document.getElementById('detectionBadge').textContent = detectionsList.length;
-  document.getElementById('statDetections').textContent = detectionsList.length;
+  const elDetBadge = document.getElementById('detectionBadge');
+  if (elDetBadge) elDetBadge.textContent = detectionsList.length;
+  const elStatDet = document.getElementById('statDetections');
+  if (elStatDet) elStatDet.textContent = detectionsList.length;
 
   updateDetectionFeed();
   updateDetectionLog();
@@ -539,8 +545,10 @@ function clearDetections() {
   detectionsList = [];
   updateDetectionFeed();
   updateDetectionLog();
-  document.getElementById('detectionBadge').textContent = '0';
-  document.getElementById('statDetections').textContent = '0';
+  const b1 = document.getElementById('detectionBadge');
+  if (b1) b1.textContent = '0';
+  const b2 = document.getElementById('statDetections');
+  if (b2) b2.textContent = '0';
 }
 
 function formatTime(ts) {
@@ -617,7 +625,8 @@ async function startNetworkScan() {
     statusTitle.textContent = `تم العثور على (${discoveredCameras.length}) كاميرا على شبكتك المحلية!`;
     statusSubtitle.textContent = 'يمكنك إضافة الكاميرات المختارة للمراقبة فوراً';
 
-    document.getElementById('scannedCountBadge').textContent = discoveredCameras.length;
+    const badge = document.getElementById('scannedCountBadge');
+    if (badge) badge.textContent = discoveredCameras.length;
     btnAddAll.style.display = 'inline-flex';
 
     renderDiscoveredCamerasList();
@@ -920,8 +929,10 @@ rased.on('updater:progress', (p) => {
 // ===== Init =====
 async function init() {
   const cameras = await rased.cameras.list();
-  document.getElementById('cameraBadge').textContent = cameras.length;
-  document.getElementById('statCameras').textContent = cameras.filter(c => c.enabled).length;
+  const camBadge = document.getElementById('cameraBadge');
+  if (camBadge) camBadge.textContent = cameras.length;
+  const statCams = document.getElementById('statCameras');
+  if (statCams) statCams.textContent = cameras.filter(c => c.enabled).length;
 
   const status = await rased.agent.status();
   setAgentUI(status.running);
