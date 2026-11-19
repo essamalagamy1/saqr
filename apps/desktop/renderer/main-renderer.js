@@ -113,6 +113,16 @@ async function loadCameras() {
         <div class="camera-url">${escapeHtml(maskPasswordInUrl(cam.rtspUrl) || 'بدون مسار بث')}</div>
       </div>
       <div class="camera-actions">
+        <!-- Expand NVR Channels (16 Channels) Button -->
+        <button class="btn-icon" onclick="promptExpandNvr('${cam.id}')" title="توسيع قنوات المسجل NVR (16 / 8 / 4 قنوات)">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="color: #f59e0b;">
+            <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
+            <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
+            <line x1="6" y1="6" x2="6.01" y2="6"/>
+            <line x1="6" y1="18" x2="6.01" y2="18"/>
+          </svg>
+        </button>
+
         <!-- Edit Credentials / Password Button -->
         <button class="btn-icon ${needsPassword ? 'warning-glow' : ''}" onclick="openEditPasswordModal('${cam.id}')" title="إضافة / تعديل كلمة المرور أو كود التحقق">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
@@ -382,13 +392,22 @@ async function fetchServerCameras(silent = false) {
       let updatedCount = 0;
 
       for (const cam of result.data) {
-        const rtsp = cam.rtsp_url || (cam.dvr_ip ? `rtsp://${cam.dvr_ip}:554/ch1/main` : '');
-        const isExisting = existing.some(c => c.id === cam.id || (c.rtspUrl && rtsp && c.rtspUrl.includes(cam.dvr_ip || '---')));
+        const rtsp = cam.rtsp_url || (cam.dvr_ip ? `rtsp://${cam.dvr_ip}:554/Streaming/Channels/101` : '');
+        const cleanRtsp = rtsp.replace(/^rtsp[s]?:\/\/[^@]+@/i, 'rtsp://').trim().toLowerCase();
+        
+        const isExisting = existing.some(c => {
+          if (c.id === cam.id) return true;
+          const cClean = (c.rtspUrl || '').replace(/^rtsp[s]?:\/\/[^@]+@/i, 'rtsp://').trim().toLowerCase();
+          return cClean && cleanRtsp && cClean === cleanRtsp;
+        });
         
         await rased.cameras.add({
           id: cam.id,
           name: cam.name,
           rtspUrl: rtsp,
+          channel: cam.dvr_channel ? parseInt(cam.dvr_channel.replace(/\D/g, ''), 10) || undefined : undefined,
+          dvrIp: cam.dvr_ip || '',
+          dvrChannel: cam.dvr_channel || '',
           branchId: cam.branch_id || '',
           enabled: cam.status === 'active' || cam.status === 'online',
         });
@@ -398,7 +417,7 @@ async function fetchServerCameras(silent = false) {
       }
       loadCameras();
       if (!silent) {
-        alert(`تمت مزامنة الكاميرات مع الخادم بنجاح! (تمت إضافة ${newCount} وتحديث ${updatedCount} كاميرا دون أي تكرار).`);
+        alert(`تمت مزامنة الكاميرات مع الخادم بنجاح! (تم سحب ${newCount} كاميرا جديدة وتحديث ${updatedCount}).`);
       }
     } else if (!silent) {
       alert(result.error || 'لم يتم العثور على كاميرات مسجلة في حسابك على الخادم.');
@@ -682,8 +701,8 @@ async function renderDiscoveredCamerasList() {
         </div>
         <div style="display: flex; gap: 6px; align-items: center;">
           ${(!cam.channel || cam.totalChannels === 1) ? `
-            <button class="btn btn-secondary" onclick="expandToNvrChannels(${idx})" id="btnExpandNvr-${idx}" style="font-size: 10px; padding: 5px 8px; border-color: rgba(245, 158, 11, 0.5); color: #f59e0b;" title="إضافة كافة القنوات الثمانية لهذا المسجل">
-              + NVR (8 قنوات)
+            <button class="btn btn-secondary" onclick="expandToNvrChannels(${idx}, 16)" id="btnExpandNvr-${idx}" style="font-size: 11px; padding: 5px 10px; border-color: rgba(245, 158, 11, 0.6); color: #f59e0b; font-weight: bold;" title="إضافة كافة القنوات الـ 16 لهذا المسجل">
+              + NVR (16 قناة)
             </button>
           ` : ''}
           ${isAlreadyAdded ? `
@@ -701,36 +720,97 @@ async function renderDiscoveredCamerasList() {
   }).join('');
 }
 
-async function expandToNvrChannels(index) {
+async function promptExpandNvr(id) {
+  const cameras = await rased.cameras.list();
+  const cam = cameras.find(c => c.id === id);
+  if (!cam) return;
+
+  const url = cam.rtspUrl || '';
+  let host = url.replace(/^rtsp[s]?:\/\//i, '');
+  let creds = '';
+  if (host.includes('@')) {
+    const parts = host.split('@');
+    creds = parts[0];
+    host = parts[1];
+  }
+  const ip = host.split('/')[0].split(':')[0];
+
+  const choice = prompt(
+    `توسيع مسجل الفيديو (${ip}) إلى قنوات الكاميرات:\n\nأدخل عدد القنوات المطلوبة (16 أو 8 أو 4 أو 32):`,
+    '16'
+  );
+  if (!choice) return;
+
+  const count = parseInt(choice, 10);
+  if (isNaN(count) || count < 2 || count > 64) {
+    alert('يرجى إدخال عدد قنوات صالح بين 2 و 64 (مثلاً 16).');
+    return;
+  }
+
+  const isDahua = url.includes('realmonitor') || url.includes('channel=');
+
+  for (let ch = 1; ch <= count; ch++) {
+    const chPath = isDahua
+      ? `/cam/realmonitor?channel=${ch}&subtype=0`
+      : `/Streaming/Channels/${ch}01`;
+
+    const chUrl = creds ? `rtsp://${creds}@${ip}:554${chPath}` : `rtsp://${ip}:554${chPath}`;
+
+    await rased.cameras.add({
+      name: `كاميرا ${ch} (قناة ${ch}) — ${ip}`,
+      rtspUrl: chUrl,
+      channel: ch,
+      dvrIp: ip,
+      dvrChannel: `CH${ch}`,
+      enabled: true,
+    });
+  }
+
+  await loadCameras();
+  rased.cameras.syncAllToCloud().catch(() => {});
+  alert(`تم بنجاح إضافة كافة قنوات المسجل الـ ${count} لجهاز (${ip}) ومزامنتها!`);
+}
+
+async function expandToNvrChannels(index, count = 16) {
   const cam = discoveredCameras[index];
   if (!cam) return;
 
   const btn = document.getElementById(`btnExpandNvr-${index}`);
   if (btn) {
     btn.disabled = true;
-    btn.textContent = 'جاري إضافة 8 قنوات...';
+    btn.textContent = `جاري إضافة ${count} قنوات...`;
   }
 
-  for (let ch = 1; ch <= 8; ch++) {
-    const chUrl = `rtsp://${cam.ip}:554/Streaming/Channels/${ch}01`;
+  // Preserve credentials if present
+  let creds = '';
+  if (cam.rtspUrl && cam.rtspUrl.includes('@')) {
+    const m = cam.rtspUrl.match(/^rtsp[s]?:\/\/([^@]+)@/i);
+    if (m) creds = m[1];
+  }
+
+  for (let ch = 1; ch <= count; ch++) {
+    const chPath = `/Streaming/Channels/${ch}01`;
+    const chUrl = creds ? `rtsp://${creds}@${cam.ip}:554${chPath}` : `rtsp://${cam.ip}:554${chPath}`;
+    
     await rased.cameras.add({
       name: `كاميرا ${ch} (قناة ${ch}) — ${cam.ip}`,
       rtspUrl: chUrl,
       channel: ch,
       dvrIp: cam.ip,
+      dvrChannel: `CH${ch}`,
       enabled: true,
     });
   }
 
   if (btn) {
     btn.className = 'btn btn-secondary';
-    btn.textContent = '✓ تمت إضافة 8 قنوات';
+    btn.textContent = `✓ تمت إضافة ${count} قنوات`;
     btn.style.opacity = '0.8';
   }
 
   loadCameras();
   rased.cameras.syncAllToCloud().catch(() => {});
-  alert(`تمت إضافة كافة قنوات الـ NVR الثمانية (CH1 - CH8) لجهاز (${cam.ip}) بنجاح ومزامنتها!`);
+  alert(`تمت إضافة كافة قنوات الـ NVR الـ (${count} قنوات) لجهاز (${cam.ip}) بنجاح ومزامنتها!`);
 }
 
 async function addSingleScannedCamera(index) {
