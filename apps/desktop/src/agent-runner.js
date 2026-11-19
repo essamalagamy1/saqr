@@ -3,12 +3,91 @@ const CameraWorker = require('./camera-worker');
 const AIEngine = require('./ai-engine');
 const ApiClient = require('./api-client');
 
+/**
+ * Tracks objects across frames to prevent alert spam.
+ * Only triggers an event when a new object enters or after a re-alert cooldown.
+ */
+class ObjectTracker {
+  constructor(options = {}) {
+    this.iouThreshold = options.iouThreshold || 0.3;
+    this.reAlertIntervalMs = options.reAlertIntervalMs || 120000; // 2 minutes cooldown before re-alerting on same person
+    this.trackMaxAgeMs = options.trackMaxAgeMs || 15000; // 15s without seeing person = person left scene
+    this.tracks = new Map(); // camera_id -> [ { id, label, box, firstSeen, lastSeen, lastAlerted } ]
+  }
+
+  filterNewDetections(cameraId, detections) {
+    const now = Date.now();
+    let cameraTracks = this.tracks.get(cameraId) || [];
+
+    // Remove tracks that haven't been seen for trackMaxAgeMs (person walked away)
+    cameraTracks = cameraTracks.filter(t => (now - t.lastSeen) < this.trackMaxAgeMs);
+
+    const newEvents = [];
+
+    for (const det of detections) {
+      let matchedTrack = null;
+      let highestIou = 0;
+
+      for (const track of cameraTracks) {
+        if (track.label === det.label) {
+          const iou = this._computeIOU(track.box, det.box);
+          if (iou > this.iouThreshold && iou > highestIou) {
+            highestIou = iou;
+            matchedTrack = track;
+          }
+        }
+      }
+
+      if (matchedTrack) {
+        // Persistent object — update position and lastSeen
+        matchedTrack.lastSeen = now;
+        matchedTrack.box = det.box;
+
+        // Re-alert only if cooldown expired
+        if (now - matchedTrack.lastAlerted >= this.reAlertIntervalMs) {
+          matchedTrack.lastAlerted = now;
+          newEvents.push(det);
+        }
+      } else {
+        // Genuinely new object appeared in scene!
+        const newTrack = {
+          id: Math.random().toString(36).slice(2, 9),
+          label: det.label,
+          box: det.box,
+          firstSeen: now,
+          lastSeen: now,
+          lastAlerted: now,
+        };
+        cameraTracks.push(newTrack);
+        newEvents.push(det);
+      }
+    }
+
+    this.tracks.set(cameraId, cameraTracks);
+    return newEvents;
+  }
+
+  _computeIOU(boxA, boxB) {
+    const x1 = Math.max(boxA[0], boxB[0]);
+    const y1 = Math.max(boxA[1], boxB[1]);
+    const x2 = Math.min(boxA[2], boxB[2]);
+    const y2 = Math.min(boxA[3], boxB[3]);
+
+    const interArea = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+    const areaA = (boxA[2] - boxA[0]) * (boxA[3] - boxA[1]);
+    const areaB = (boxB[2] - boxB[0]) * (boxB[3] - boxB[1]);
+
+    return interArea / (areaA + areaB - interArea + 1e-6);
+  }
+}
+
 class AgentRunner {
   constructor(store, onDetection) {
     this.store = store;
     this.onDetection = onDetection;
     this.cameraWorker = new CameraWorker();
     this.aiEngine = new AIEngine();
+    this.tracker = new ObjectTracker();
     this.apiClient = null;
     this.running = false;
     this.stats = {
@@ -115,8 +194,12 @@ class AgentRunner {
 
       if (!detections || detections.length === 0) return;
 
+      // Filter: only trigger new alerts when a new object appears or after cooldown
+      const newDetections = this.tracker.filterNewDetections(camera.id, detections);
+      if (newDetections.length === 0) return;
+
       // Build detection event
-      for (const det of detections) {
+      for (const det of newDetections) {
         // Upload a frozen snapshot of this exact frame for the detection card
         let snapshotUrl = null;
         if (this.apiClient && frameBuffer && frameBuffer.length > 500) {

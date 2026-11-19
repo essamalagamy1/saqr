@@ -134,12 +134,36 @@ class AIEngine {
   }
 
   /**
-   * Post-process YOLOX output: decode boxes, apply NMS.
+   * Generates YOLOX grid coordinates and strides for decoding output feature maps.
+   */
+  _getStridesAndGrids(targetH, targetW) {
+    const strides = [8, 16, 32];
+    const grids = [];
+    const expandedStrides = [];
+
+    for (const stride of strides) {
+      const numGridY = Math.floor(targetH / stride);
+      const numGridX = Math.floor(targetW / stride);
+      for (let g1 = 0; g1 < numGridY; g1++) {
+        for (let g0 = 0; g0 < numGridX; g0++) {
+          grids.push(g0, g1);
+          expandedStrides.push(stride);
+        }
+      }
+    }
+    return { grids, strides: expandedStrides };
+  }
+
+  /**
+   * Post-process YOLOX output: decode anchor-free grid boxes, apply NMS.
    */
   _postprocess(data, dims, ratio, origW, origH) {
     const numDetections = dims[1];
     const numAttrs = dims[2]; // x, y, w, h, obj_conf, ...class_scores
     const numClasses = numAttrs - 5;
+
+    const [targetH, targetW] = this.inputSize;
+    const { grids, strides } = this._getStridesAndGrids(targetH, targetW);
 
     const detections = [];
 
@@ -162,10 +186,14 @@ class AIEngine {
       const finalScore = objConf * bestClassScore;
       if (finalScore < this.confThreshold) continue;
 
-      const cx = data[offset];
-      const cy = data[offset + 1];
-      const w = data[offset + 2];
-      const h = data[offset + 3];
+      const gx = grids[i * 2];
+      const gy = grids[i * 2 + 1];
+      const stride = strides[i];
+
+      const cx = (data[offset] + gx) * stride;
+      const cy = (data[offset + 1] + gy) * stride;
+      const w = Math.exp(data[offset + 2]) * stride;
+      const h = Math.exp(data[offset + 3]) * stride;
 
       const x1 = Math.max(0, (cx - w / 2) / ratio);
       const y1 = Math.max(0, (cy - h / 2) / ratio);
@@ -223,12 +251,8 @@ class AIEngine {
   }
 
   _fallbackDetect() {
-    return [{
-      box: [450, 180, 720, 680],
-      label: 'person',
-      classId: 0,
-      score: 0.96,
-    }];
+    // In production, never fabricate fake detections if model is absent or error occurs
+    return [];
   }
 
   async dispose() {
