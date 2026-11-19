@@ -411,7 +411,9 @@ async function fetchServerCameras(silent = false) {
       let updatedCount = 0;
 
       for (const cam of result.data) {
-        const rtsp = cam.rtsp_url || (cam.dvr_ip ? `rtsp://${cam.dvr_ip}:554/Streaming/Channels/101` : '');
+        const chNum = cam.dvr_channel ? parseInt(cam.dvr_channel.replace(/\D/g, ''), 10) || 1 : 1;
+        const rtsp = cam.rtsp_url || (cam.dvr_ip ? `rtsp://${cam.dvr_ip}:554/Streaming/Channels/${chNum}01` : '');
+        const subRtsp = cam.dvr_ip ? `rtsp://${cam.dvr_ip}:554/Streaming/Channels/${chNum}02` : rtsp;
         const cleanRtsp = rtsp.replace(/^rtsp[s]?:\/\/[^@]+@/i, 'rtsp://').trim().toLowerCase();
         
         const isExisting = existing.some(c => {
@@ -424,9 +426,10 @@ async function fetchServerCameras(silent = false) {
           id: cam.id,
           name: cam.name,
           rtspUrl: rtsp,
-          channel: cam.dvr_channel ? parseInt(cam.dvr_channel.replace(/\D/g, ''), 10) || undefined : undefined,
+          subRtspUrl: subRtsp,
+          channel: chNum,
           dvrIp: cam.dvr_ip || '',
-          dvrChannel: cam.dvr_channel || '',
+          dvrChannel: cam.dvr_channel || `CH${chNum}`,
           branchId: cam.branch_id || '',
           enabled: cam.status === 'active' || cam.status === 'online',
         });
@@ -435,6 +438,10 @@ async function fetchServerCameras(silent = false) {
         else newCount++;
       }
       loadCameras();
+      if (newCount > 0 && agentRunning) {
+        // Automatically reload active capture workers so new channels start capturing immediately
+        rased.agent.reloadCameras().catch(() => {});
+      }
       if (!silent) {
         alert(`تمت مزامنة الكاميرات مع الخادم بنجاح! (تم سحب ${newCount} كاميرا جديدة وتحديث ${updatedCount}).`);
       }
@@ -1211,6 +1218,9 @@ async function init() {
 
   // Auto-sync cameras from server in background on launch
   setTimeout(() => fetchServerCameras(true), 1500);
+
+  // Periodic auto-sync cameras from server every 15 seconds
+  setInterval(() => fetchServerCameras(true), 15000);
 
   // Background check for updates without opening modal
   setTimeout(() => checkAppUpdates(false), 2500);

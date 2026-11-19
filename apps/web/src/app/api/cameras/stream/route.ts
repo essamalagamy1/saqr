@@ -45,9 +45,18 @@ export async function POST(req: NextRequest) {
     if (cameraId) {
       global.cameraLiveFrames?.set(cameraId, frameData);
     }
-    if (cameraIp) {
+    if (cameraIp && cameraChannel) {
+      const cleanCh = cameraChannel.toLowerCase().trim();
+      global.cameraLiveFrames?.set(`${cameraIp}_${cleanCh}`, frameData);
+      // Also index by number only if formatted like CH1 / CH01
+      const numOnly = cleanCh.replace(/[^0-9]/g, '');
+      if (numOnly) {
+        global.cameraLiveFrames?.set(`${cameraIp}_ch${numOnly}`, frameData);
+        global.cameraLiveFrames?.set(`${cameraIp}_${numOnly}`, frameData);
+      }
+    } else if (cameraIp) {
+      // Only set bare IP if no channel was specified (single standalone camera)
       global.cameraLiveFrames?.set(cameraIp, frameData);
-      global.cameraLiveFrames?.set(`${cameraIp}_${cameraChannel.toLowerCase()}`, frameData);
     }
 
     return NextResponse.json({

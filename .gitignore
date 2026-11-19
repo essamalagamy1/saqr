@@ -88,3 +88,4 @@ data/
 apps/web/public/downloads/*.zip
 apps/web/public/downloads/*.asar
 
+storage

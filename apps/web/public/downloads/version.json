@@ -1,14 +1,14 @@
 {
-  "version": "1.3.11",
+  "version": "1.3.13",
   "name": "Saqr Edge Agent",
   "releaseDate": "2026-11-19",
   "asarUrl": "/downloads/app.asar",
   "zipUrl": "/downloads/Saqr-Edge-Agent-Win64.zip",
   "changelog": [
-    "إضافة ميزة الاتصال المباشر بأجهزة DVR / NVR (Hikvision ISAPI, Dahua CGI, ONVIF) وسحب واستيراد كافة القنوات المتصلة (16 أو 32 قناة) دفعة واحدة",
-    "تفعيل خاصية البث المزدوج الذكي (Dual Streaming): سحب مسار Sub-Stream الخفيف لمعالجة الذكاء الاصطناعي YOLOX وتوفير 80% من استهلاك المعالج مع توفير Main-Stream للقطات التوثيق",
-    "تكامل متكامل مع سياسة التخزين متدرج المراحل (Tiered Storage: Hot 30 days -> Warm WebP 90 days -> Cold Purge) مع التثبيت الدائم لمهام العمل والأدلة الرسمية",
-    "دعم استيراد قنوات الـ DVR واختيار الفرع مباشرة من تطبيق المراقبة الميداني ومنصة الويب"
+    "منع تكرار عمليات الرصد للشخص الواحد (Intelligent Anti-Spam & De-Duplication): كبح التنبيهات المكررة لحالات التسكع (Loitering) لتسجيل تنبيه واحد فقط لكل جلسة تواجد مع فترة تهدئة 5 دقائق",
+    "منع تعدد العمليات على نفس الشخص في اللحظة ذاتها (Single Highest-Priority Violation Selection): اختيار المخالفة الأعلى أولوية فقط في كل لحظة وإلغاء تسجيل أحداث متضاربة متزامنة",
+    "كبت إشعارات التواجد العام (Generic Presence Suppression): إيقاف تسجيل 'رصد أشخاص' عند وجود أي مخالفة نشطة في نفس الكاميرا",
+    "تتبع الأشخاص بالهوية الموحدة عبر الإطارات (Centroid Identity Tracking) لضمان عدم تكرار التنبيه على نفس الشخص المتواجد في المشهد"
   ],
-  "releaseNotes": "v1.3.11: Direct DVR/NVR Auto-Discovery, Dual-Streaming AI Engine & Tiered Storage Lifecycle"
+  "releaseNotes": "v1.3.13: Smart De-Duplication, Loitering Session Throttling & Priority Violation Arbitration"
 }

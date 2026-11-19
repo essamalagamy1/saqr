@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -211,6 +212,61 @@ func (h *Handler) Ingest(c *fiber.Ctx) error {
 	}
 	if req.Severity == "" {
 		req.Severity = "medium"
+	}
+
+	// 2. Intelligent Anti-Spam / Deduplication Check
+	// Prevent duplicate alerts on the same camera for the same violation type within cooldown windows
+	var duplicateCooldownSeconds int = 60 // Default 60 seconds cooldown for identical alerts
+	if strings.Contains(req.Type, "تسكع") || strings.Contains(strings.ToLower(req.Type), "loiter") {
+		duplicateCooldownSeconds = 300 // 5 minutes cooldown for Loitering
+	} else if strings.Contains(req.Type, "Person detected") || strings.Contains(req.Type, "أشخاص") {
+		duplicateCooldownSeconds = 180 // 3 minutes cooldown for generic presence
+	} else if strings.Contains(req.Type, "جوال") || strings.Contains(strings.ToLower(req.Type), "phone") {
+		duplicateCooldownSeconds = 180 // 3 minutes cooldown for phone usage
+	} else if strings.Contains(req.Type, "كمامة") || strings.Contains(req.Type, "غطاء") || strings.Contains(strings.ToLower(req.Type), "ppe") || strings.Contains(strings.ToLower(req.Type), "mask") {
+		duplicateCooldownSeconds = 180 // 3 minutes cooldown for PPE violations
+	}
+
+	var existingRecentID string
+	errDup := h.db.QueryRow(c.Context(), `
+		SELECT id FROM detections 
+		WHERE company_id = $1 
+		  AND camera_id = $2 
+		  AND type = $3 
+		  AND detected_at >= NOW() - ($4 || ' seconds')::interval
+		LIMIT 1
+	`, companyID, req.CameraID, req.Type, fmt.Sprintf("%d", duplicateCooldownSeconds)).Scan(&existingRecentID)
+
+	if errDup == nil && existingRecentID != "" {
+		// Throttled duplicate: return clean success without inserting duplicate row
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"success":      true,
+			"deduplicated": true,
+			"message":      "Detection throttled: identical event on this camera within cooldown period",
+			"existing_id":  existingRecentID,
+		})
+	}
+
+	// If this is a low-priority generic presence detection, suppress it if an active violation was already logged in the last 60 seconds
+	if strings.Contains(req.Type, "Person detected") || strings.Contains(req.Type, "أشخاص") {
+		var activeViolationID string
+		_ = h.db.QueryRow(c.Context(), `
+			SELECT id FROM detections
+			WHERE company_id = $1
+			  AND camera_id = $2
+			  AND severity IN ('medium', 'high', 'critical')
+			  AND detected_at >= NOW() - INTERVAL '60 seconds'
+			LIMIT 1
+		`, companyID, req.CameraID).Scan(&activeViolationID)
+
+		if activeViolationID != "" {
+			return c.Status(fiber.StatusOK).JSON(fiber.Map{
+				"success":      true,
+				"suppressed":   true,
+				"message":      "Presence detection suppressed in favor of active higher-priority violation",
+				"violation_id": activeViolationID,
+			})
+		}
 	}
 
 	query := `

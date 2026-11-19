@@ -10,15 +10,23 @@ export async function GET(
   const url = new URL(req.url);
   const ip = url.searchParams.get('ip') || '';
   const ch = url.searchParams.get('ch') || '';
+  const cleanCh = ch ? ch.toLowerCase().trim() : '';
+  const numOnly = cleanCh ? cleanCh.replace(/[^0-9]/g, '') : '';
 
   const cache = (global as any).cameraLiveFrames as Map<string, { buffer: Buffer; updatedAt: number }> | undefined;
 
   let frameData = cache?.get(id);
 
-  if (!frameData && ip && ch && cache) {
-    frameData = cache.get(`${ip}_${ch.toLowerCase()}`);
+  if (!frameData && ip && cleanCh && cache) {
+    frameData = cache.get(`${ip}_${cleanCh}`);
+    if (!frameData && numOnly) {
+      frameData = cache.get(`${ip}_ch${numOnly}`) || cache.get(`${ip}_${numOnly}`);
+    }
   }
-  if (!frameData && ip && cache) {
+
+  // Only fall back to bare IP if NO channel was specified at all (single standalone camera)
+  // For DVR/NVR multi-channel devices, never cross-contaminate channels
+  if (!frameData && ip && !cleanCh && cache) {
     frameData = cache.get(ip);
   }
 

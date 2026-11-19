@@ -10,8 +10,8 @@ const ApiClient = require('./api-client');
 class ObjectTracker {
   constructor(options = {}) {
     this.iouThreshold = options.iouThreshold || 0.25;
-    this.reAlertIntervalMs = options.reAlertIntervalMs || 15000; // 15 seconds cooldown
-    this.trackMaxAgeMs = options.trackMaxAgeMs || 8000; // 8s without seeing person = person left scene
+    this.reAlertIntervalMs = options.reAlertIntervalMs || 180000; // 3 minutes cooldown (anti-spam)
+    this.trackMaxAgeMs = options.trackMaxAgeMs || 15000; // 15s without seeing person = person left scene
     this.tracks = new Map(); // camera_id -> [ { id, label, box, firstSeen, lastSeen, lastAlerted } ]
   }
 
@@ -142,13 +142,14 @@ class AgentRunner {
 
     let delay = 0;
     for (const camera of cameras) {
-      if (!camera.rtspUrl) continue;
+      const streamUrl = camera.subRtspUrl || camera.rtspUrl;
+      if (!streamUrl) continue;
       setTimeout(() => {
         if (!this.running) return;
-        console.log(`[AGENT] 🎥 Activating capture worker for: ${camera.name} (${camera.rtspUrl})`);
+        console.log(`[AGENT] 🎥 Activating capture worker for: ${camera.name} (${streamUrl})`);
         this.cameraWorker.startCapture(
           camera.id,
-          camera.rtspUrl,
+          streamUrl,
           interval,
           async (cameraId, frame, error) => {
             if (!this.running) return;
@@ -180,7 +181,10 @@ class AgentRunner {
         }
         let ch = camera.channel ? `CH${camera.channel}` : (camera.dvrChannel || '');
         if (!ch && camera.rtspUrl) {
-          const chMatch = camera.rtspUrl.match(/\/Streaming\/Channels\/(\d+)01/i) || camera.rtspUrl.match(/\/ch(\d+)\//i) || camera.rtspUrl.match(/\/(\d{1,2})01\b/i);
+          const chMatch = camera.rtspUrl.match(/\/Streaming\/Channels\/(\d{1,2})(?:01|02|03)/i) ||
+                          camera.rtspUrl.match(/\/cam\/realmonitor\?channel=(\d+)/i) ||
+                          camera.rtspUrl.match(/\/ch(\d+)\//i) ||
+                          camera.rtspUrl.match(/\/(\d{1,2})01\b/i);
           if (chMatch) ch = `CH${parseInt(chMatch[1], 10)}`;
         }
         if (!ch) ch = 'CH1';
