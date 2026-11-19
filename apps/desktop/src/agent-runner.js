@@ -9,9 +9,9 @@ const ApiClient = require('./api-client');
  */
 class ObjectTracker {
   constructor(options = {}) {
-    this.iouThreshold = options.iouThreshold || 0.3;
-    this.reAlertIntervalMs = options.reAlertIntervalMs || 120000; // 2 minutes cooldown before re-alerting on same person
-    this.trackMaxAgeMs = options.trackMaxAgeMs || 15000; // 15s without seeing person = person left scene
+    this.iouThreshold = options.iouThreshold || 0.25;
+    this.reAlertIntervalMs = options.reAlertIntervalMs || 15000; // 15 seconds cooldown
+    this.trackMaxAgeMs = options.trackMaxAgeMs || 8000; // 8s without seeing person = person left scene
     this.tracks = new Map(); // camera_id -> [ { id, label, box, firstSeen, lastSeen, lastAlerted } ]
   }
 
@@ -189,7 +189,7 @@ class AgentRunner {
       }
 
       // Run AI detection
-      const detections = await this.aiEngine.detect(frameBuffer);
+      const detections = await this.aiEngine.detect(frameBuffer, camera.id);
       this.stats.detectionsFound += detections.length;
 
       if (!detections || detections.length === 0) return;

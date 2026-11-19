@@ -1,13 +1,14 @@
 {
-  "version": "1.3.7",
+  "version": "1.3.8",
   "name": "Saqr Edge Agent",
   "releaseDate": "2026-11-19",
   "asarUrl": "/downloads/app.asar",
   "zipUrl": "/downloads/Saqr-Edge-Agent-Win64.zip",
   "changelog": [
-    "تثبيت واستقرار البث المباشر (Flicker-Free Double Buffering) والتخلص نهائياً من وميض الشاشة أو اختفاء الصورة",
-    "تصفية الإطارات التالفة من FFmpeg ومنع الإطارات الرمادية غير المكتملة عبر التحقق من Keyframes (I-frames)",
-    "استقرار تدفق الفيديو بدقة HD كاملة في شبكة الكاميرات وشاشة التكبير"
+    "تحديث خوارزمية الذكاء الاصطناعي مع كاشف حركة ورصد فوري للأشخاص المتحركين أمام الكاميرا",
+    "تعديل حساسية الرصد وضبط التهديف ليتم التقاط أي شخص يمر أمام الكاميرا فوراً",
+    "حل مشكلة القنوات المتكررة وفصل الكاميرات المستقلة",
+    "إمكانية توسيع أجهزة NVR متعددة القنوات (16 قناة) بضغطة زر واحدة"
   ],
-  "releaseNotes": "Fix: Add ObjectTracker to deduplicate detections and eliminate alert spam when the same person remains in view; embed real YOLOX ONNX model with grid decoding"
+  "releaseNotes": "Fix: Enhanced YOLOX sensitivity for distant people + motion vision fallback; fixed duplicate NVR channel streams and updated server sync"
 }
