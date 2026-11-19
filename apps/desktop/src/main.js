@@ -92,10 +92,24 @@ function createMainWindow() {
 
   mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'main.html'));
 
+  let hasShownTrayBalloon = false;
+
   mainWindow.on('close', (e) => {
-    if (store.get('minimizeToTray') && !app.isQuitting) {
+    // If user clicked close button (X), hide to system tray instead of exiting
+    if (!app.isQuitting) {
       e.preventDefault();
       mainWindow.hide();
+
+      // Show balloon notification so the user knows monitoring is running in background
+      if (process.platform === 'win32' && tray && !hasShownTrayBalloon) {
+        hasShownTrayBalloon = true;
+        try {
+          tray.displayBalloon({
+            title: 'صَقْر — المراقبة مستمرة في الخلفية',
+            content: 'تم تصغير صقر إلى شريط المهام بجوار الساعة، ومراقبة الكاميرات والذكاء الاصطناعي مستمرة في العمل.',
+          });
+        } catch {}
+      }
     }
   });
 
@@ -108,30 +122,67 @@ function getIconPath() {
 }
 
 function createTray() {
+  if (tray) return;
+
   const iconPath = getIconPath();
   let trayIcon;
   try {
-    trayIcon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
+    trayIcon = nativeImage.createFromPath(iconPath);
   } catch {
     trayIcon = nativeImage.createEmpty();
   }
   tray = new Tray(trayIcon);
 
   const contextMenu = Menu.buildFromTemplate([
-    { label: 'فتح صَقْر', click: () => {
-      if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
-    }},
+    {
+      label: 'فتح صَقْر Edge Agent',
+      click: () => {
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      }
+    },
     { type: 'separator' },
-    { label: 'بدء المراقبة', click: () => startAgent() },
-    { label: 'إيقاف المراقبة', click: () => stopAgent() },
+    {
+      label: 'بدء المراقبة الحية',
+      click: () => startAgent()
+    },
+    {
+      label: 'إيقاف المراقبة',
+      click: () => stopAgent()
+    },
     { type: 'separator' },
-    { label: 'خروج', click: () => { app.isQuitting = true; app.quit(); }}
+    {
+      label: 'خروج نهائي من التطبيق',
+      click: () => {
+        app.isQuitting = true;
+        app.quit();
+      }
+    }
   ]);
 
-  tray.setToolTip('Saqr Edge Agent — صَقْر');
+  tray.setToolTip('Saqr Edge Agent — المراقبة في الخلفية نشطة');
   tray.setContextMenu(contextMenu);
+
+  // Single-click restores window on Windows
+  tray.on('click', () => {
+    if (mainWindow) {
+      if (mainWindow.isVisible()) {
+        mainWindow.focus();
+      } else {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    }
+  });
+
+  // Double-click also restores window
   tray.on('double-click', () => {
-    if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
+    if (mainWindow) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
   });
 }
 
@@ -186,7 +237,19 @@ ipcMain.on('window:close', (e) => {
 
 // Config
 ipcMain.handle('config:get', (_, key) => store.get(key));
-ipcMain.handle('config:set', (_, key, value) => { store.set(key, value); return true; });
+ipcMain.handle('config:set', (_, key, value) => {
+  store.set(key, value);
+  if (key === 'autoStart') {
+    try {
+      app.setLoginItemSettings({
+        openAtLogin: !!value,
+        path: process.execPath,
+        args: ['--hidden'],
+      });
+    } catch {}
+  }
+  return true;
+});
 ipcMain.handle('config:getAll', () => store.store);
 
 // Connection test
@@ -591,13 +654,15 @@ app.whenReady().then(() => {
   } else {
     createMainWindow();
     createTray();
-    if (store.get('autoStart')) startAgent();
+    // Always start background camera capture & AI processing
+    startAgent();
   }
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    if (!store.get('minimizeToTray')) app.quit();
+  // Stay running in system tray background unless user explicitly clicked 'خروج نهائي'
+  if (app.isQuitting) {
+    app.quit();
   }
 });
 

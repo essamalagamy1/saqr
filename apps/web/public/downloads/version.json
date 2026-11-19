@@ -1,5 +1,5 @@
 {
-  "version": "1.3.5",
+  "version": "1.3.6",
   "name": "Saqr Edge Agent",
   "releaseDate": "2026-11-19",
   "asarUrl": "/downloads/app.asar",
@@ -9,5 +9,5 @@
     "تصفية الإطارات التالفة من FFmpeg ومنع الإطارات الرمادية غير المكتملة عبر التحقق من Keyframes (I-frames)",
     "استقرار تدفق الفيديو بدقة HD كاملة في شبكة الكاميرات وشاشة التكبير"
   ],
-  "releaseNotes": "Fix: Eliminate gray and incomplete frames via keyframe synchronization and statistical image validation; add auto-retry for corrupted RTSP decodes"
+  "releaseNotes": "Feature: Background tray mode enabled by default; app minimizes to system tray on close with notification, auto-starts capture on launch, and supports Windows startup"
 }
