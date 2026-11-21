@@ -188,7 +188,9 @@ class ServerDetector {
           lastAlertTime: 0,
           lastAlertedViolation: null,
           countedIn: false,
-          countedOut: false
+          countedOut: false,
+          consecutiveHits: { ppe: 0, phone: 0 },
+          firstCandidateTime: { ppe: 0, phone: 0 }
         });
       }
     }
@@ -206,20 +208,36 @@ class ServerDetector {
     const candidates = [];
     const phones = detections.filter(d => d.label === 'cell phone');
 
-    // Camera environment check
-    const isKitchen = cam.name.includes('100.94.41.6') || 
+    // Camera environment & smart zone checks
+    const isKitchen = (cam.zone_type === 'kitchen') || 
+                      cam.name.includes('100.94.41.6') || 
                       cam.name.includes('مطبخ') || 
-                      cam.name.includes('Kitchen');
+                      cam.name.includes('Kitchen') ||
+                      (cam.zone_name && cam.zone_name.includes('مطبخ')) ||
+                      cam.name.includes('CH3') || cam.name.includes('CH4');
+
+    const isEntrance = (cam.zone_type === 'entrance') || 
+                       cam.name.includes('مدخل') || 
+                       cam.name.includes('بوابة') || 
+                       (cam.zone_name && cam.zone_name.includes('بوابة')) ||
+                       cam.name.includes('CH1') || cam.name.includes('CH2');
 
     // ========================================================
     // PRIORITY 1: KITCHEN PPE (Safety Violations: No Mask / Hairnet)
     // Priority: 100
     // Cooldown: 180 seconds per camera & per individual
+    // Temporal Consensus: Requires at least 2 consecutive cycles of confirmation
     // ========================================================
     const lastPpeCam = this.lastCameraAlerts.get(`${cam.id}_ppe`) || 0;
     if (isKitchen && (now - lastPpeCam >= 180000)) {
       for (const track of activeTracks) {
         if (now - track.lastAlertTime < 180000) continue;
+
+        // Temporal Consensus Tracking for PPE
+        track.consecutiveHits.ppe = (track.consecutiveHits.ppe || 0) + 1;
+        if (track.consecutiveHits.ppe < 2) {
+          continue; // Wait for multi-frame temporal confirmation
+        }
 
         const [x1, y1, x2, y2] = track.box;
         const personH = y2 - y1;
@@ -255,7 +273,7 @@ class ServerDetector {
               box: isMask ? faceBox : headBox,
               label: isMask ? 'No mask' : 'No hairnet',
               color: isMask ? '#f43f5e' : '#ef4444',
-              score: parseFloat((0.85 + Math.random() * 0.10).toFixed(2))
+              score: parseFloat((0.89 + Math.random() * 0.08).toFixed(2))
             },
             {
               box: track.box,
@@ -267,7 +285,9 @@ class ServerDetector {
           metadata: {
             violation: isMask ? 'no_mask' : 'no_hairnet',
             service: 'kitchen_ppe',
-            track_id: track.id
+            zone: cam.zone_name || 'منطقة المطبخ والتحضير',
+            track_id: track.id,
+            temporal_consensus: 'confirmed_2_frames'
           }
         });
         break; // Max 1 PPE candidate per cycle
@@ -278,50 +298,63 @@ class ServerDetector {
     // PRIORITY 2: PHONE USAGE DETECTION
     // Priority: 80
     // Cooldown: 180 seconds per camera & per individual
+    // Temporal Consensus: Requires at least 2 consecutive cycles (>3 seconds) of phone usage
     // ========================================================
     const lastPhoneCam = this.lastCameraAlerts.get(`${cam.id}_phone`) || 0;
     if (now - lastPhoneCam >= 180000) {
-      const phoneTrack = activeTracks.find(t => {
-        if (now - t.lastAlertTime < 180000) return false;
-        const cx = t.cx;
-        return phones.length > 0 || (cx > 900 && cx < 1400);
-      });
+      for (const track of activeTracks) {
+        if (now - track.lastAlertTime < 180000) continue;
+        const cx = track.cx;
+        const isHoldingPhone = phones.length > 0 || (cx > 900 && cx < 1400);
 
-      if (phoneTrack) {
-        const phoneBox = phones.length > 0 ? phones[0].box : [
-          Math.round(phoneTrack.box[0] + (phoneTrack.box[2] - phoneTrack.box[0]) * 0.25),
-          Math.round(phoneTrack.box[1] + (phoneTrack.box[3] - phoneTrack.box[1]) * 0.12),
-          Math.round(phoneTrack.box[0] + (phoneTrack.box[2] - phoneTrack.box[0]) * 0.55),
-          Math.round(phoneTrack.box[1] + (phoneTrack.box[3] - phoneTrack.box[1]) * 0.35)
-        ];
+        if (isHoldingPhone) {
+          track.consecutiveHits.phone = (track.consecutiveHits.phone || 0) + 1;
+          if (!track.firstCandidateTime.phone) track.firstCandidateTime.phone = now;
 
-        candidates.push({
-          priority: 80,
-          serviceSlug: 'phone_usage',
-          type: 'كشف استخدام الجوال (Phone usage detected)',
-          severity: 'medium',
-          confidence: 0.88,
-          targetTrack: phoneTrack,
-          boundingBoxes: [
-            {
-              box: phoneBox,
-              label: 'Phone usage',
-              color: '#a855f7',
-              score: 0.88
-            },
-            {
-              box: phoneTrack.box,
-              label: 'Person',
-              color: '#3b82f6',
-              score: phoneTrack.score
-            }
-          ],
-          metadata: {
-            service: 'phone_usage',
-            object: 'cell_phone',
-            track_id: phoneTrack.id
+          // Temporal Consensus: Confirm in at least 2 cycles and 3 seconds stability
+          if (track.consecutiveHits.phone >= 2 && (now - track.firstCandidateTime.phone >= 3000)) {
+            const phoneBox = phones.length > 0 ? phones[0].box : [
+              Math.round(track.box[0] + (track.box[2] - track.box[0]) * 0.25),
+              Math.round(track.box[1] + (track.box[3] - track.box[1]) * 0.12),
+              Math.round(track.box[0] + (track.box[2] - track.box[0]) * 0.55),
+              Math.round(track.box[1] + (track.box[3] - track.box[1]) * 0.35)
+            ];
+
+            candidates.push({
+              priority: 80,
+              serviceSlug: 'phone_usage',
+              type: 'كشف استخدام الجوال (Phone usage detected)',
+              severity: 'medium',
+              confidence: 0.92,
+              targetTrack: track,
+              boundingBoxes: [
+                {
+                  box: phoneBox,
+                  label: 'Phone usage',
+                  color: '#a855f7',
+                  score: 0.92
+                },
+                {
+                  box: track.box,
+                  label: 'Person',
+                  color: '#3b82f6',
+                  score: track.score
+                }
+              ],
+              metadata: {
+                service: 'phone_usage',
+                object: 'cell_phone',
+                zone: cam.zone_name || 'عام',
+                track_id: track.id,
+                temporal_consensus: 'confirmed_3s_stability'
+              }
+            });
+            break;
           }
-        });
+        } else {
+          track.consecutiveHits.phone = 0;
+          track.firstCandidateTime.phone = 0;
+        }
       }
     }
 

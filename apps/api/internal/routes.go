@@ -80,6 +80,9 @@ func SetupRoutes(app *fiber.App, db *pgxpool.Pool, redisClient *redis.Client, no
 	detectGroup.Patch("/:id/read", detectHandler.MarkAsRead)
 	detectGroup.Patch("/:id/acknowledge", detectHandler.Acknowledge)
 	detectGroup.Patch("/:id/pin", detectHandler.Pin)
+	detectGroup.Post("/:id/feedback", detectHandler.SubmitFeedback)
+	detectGroup.Get("/training/stats", detectHandler.TrainingStats)
+	detectGroup.Post("/training/export", detectHandler.ExportDataset)
 	detectGroup.Delete("/all", detectHandler.DeleteAll)
 	detectGroup.Delete("/:id", detectHandler.Delete)
 

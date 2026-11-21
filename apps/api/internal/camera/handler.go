@@ -13,6 +13,7 @@ type Camera struct {
 	ZoneID      *string    `json:"zone_id,omitempty"`
 	BranchName  string     `json:"branch_name,omitempty"`
 	ZoneName    string     `json:"zone_name,omitempty"`
+	ZoneType    string     `json:"zone_type,omitempty"`
 	Name        string     `json:"name"`
 	RtspURL     string     `json:"rtsp_url,omitempty"`
 	DvrIP       string     `json:"dvr_ip"`
@@ -53,7 +54,7 @@ func (h *Handler) List(c *fiber.Ctx) error {
 	branchID := c.Query("branch_id")
 
 	query := `
-		SELECT c.id, c.branch_id, c.zone_id, b.name as branch_name, COALESCE(z.name, '') as zone_name,
+		SELECT c.id, c.branch_id, c.zone_id, b.name as branch_name, COALESCE(z.name, '') as zone_name, COALESCE(z.type, 'general') as zone_type,
 		       c.name, COALESCE(c.rtsp_url_encrypted, '') as rtsp_url, COALESCE(c.dvr_ip, ''), COALESCE(c.dvr_channel, ''), c.protocol, 
 		       c.resolution, c.fps, c.status, c.last_seen_at, c.config::text, c.created_at, c.updated_at
 		FROM cameras c
@@ -80,7 +81,7 @@ func (h *Handler) List(c *fiber.Ctx) error {
 	for rows.Next() {
 		var cam Camera
 		if err := rows.Scan(
-			&cam.ID, &cam.BranchID, &cam.ZoneID, &cam.BranchName, &cam.ZoneName,
+			&cam.ID, &cam.BranchID, &cam.ZoneID, &cam.BranchName, &cam.ZoneName, &cam.ZoneType,
 			&cam.Name, &cam.RtspURL, &cam.DvrIP, &cam.DvrChannel, &cam.Protocol,
 			&cam.Resolution, &cam.FPS, &cam.Status, &cam.LastSeenAt, &cam.Config, &cam.CreatedAt, &cam.UpdatedAt,
 		); err != nil {
