@@ -142,11 +142,20 @@ class AgentRunner {
 
     let delay = 0;
     for (const camera of cameras) {
-      const streamUrl = camera.subRtspUrl || camera.rtspUrl;
+      let streamUrl = camera.subRtspUrl || camera.rtspUrl;
       if (!streamUrl) continue;
+
+      // Invariant: Guarantee credentials preservation from rtspUrl if subRtspUrl lacks them
+      if (camera.rtspUrl && camera.rtspUrl.includes('@') && !streamUrl.includes('@')) {
+        const authMatch = camera.rtspUrl.match(/^rtsp[s]?:\/\/([^@]+)@/i);
+        if (authMatch) {
+          streamUrl = streamUrl.replace(/^rtsp[s]?:\/\//i, `rtsp://${authMatch[1]}@`);
+        }
+      }
+
       setTimeout(() => {
         if (!this.running) return;
-        console.log(`[AGENT] 🎥 Activating capture worker for: ${camera.name} (${streamUrl})`);
+        console.log(`[AGENT] 🎥 Activating capture worker for: ${camera.name} (${streamUrl.replace(/\/\/[^@]+@/, '//***:***@')})`);
         this.cameraWorker.startCapture(
           camera.id,
           streamUrl,

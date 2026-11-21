@@ -435,7 +435,17 @@ async function fetchServerCameras(silent = false) {
       for (const cam of result.data) {
         const chNum = cam.dvr_channel ? parseInt(cam.dvr_channel.replace(/\D/g, ''), 10) || 1 : 1;
         const rtsp = cam.rtsp_url || (cam.dvr_ip ? `rtsp://${cam.dvr_ip}:554/Streaming/Channels/${chNum}01` : '');
-        const subRtsp = cam.dvr_ip ? `rtsp://${cam.dvr_ip}:554/Streaming/Channels/${chNum}02` : rtsp;
+        
+        // Preserve credentials in subRtspUrl
+        let subRtsp = rtsp;
+        if (rtsp.includes('/Streaming/Channels/')) {
+          subRtsp = rtsp.replace(/\/Streaming\/Channels\/(\d+)01/i, '/Streaming/Channels/$102');
+        } else if (cam.dvr_ip) {
+          const authMatch = rtsp.match(/^rtsp[s]?:\/\/([^@]+)@/i);
+          const creds = authMatch ? `${authMatch[1]}@` : '';
+          subRtsp = `rtsp://${creds}${cam.dvr_ip}:554/Streaming/Channels/${chNum}02`;
+        }
+
         const cleanRtsp = rtsp.replace(/^rtsp[s]?:\/\/[^@]+@/i, 'rtsp://').trim().toLowerCase();
         
         const isExisting = existing.some(c => {

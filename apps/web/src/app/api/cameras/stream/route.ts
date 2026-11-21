@@ -71,10 +71,21 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   const count = global.cameraLiveFrames ? global.cameraLiveFrames.size : 0;
+  const now = Date.now();
+  const details: Record<string, { ageSeconds: number; sizeBytes: number }> = {};
+  if (global.cameraLiveFrames) {
+    for (const [key, val] of global.cameraLiveFrames.entries()) {
+      details[key] = {
+        ageSeconds: Math.round((now - (val.updatedAt || 0)) / 1000),
+        sizeBytes: val.buffer?.length || 0,
+      };
+    }
+  }
   return NextResponse.json({
     success: true,
     activeFramesCount: count,
-    cachedKeys: global.cameraLiveFrames ? Array.from(global.cameraLiveFrames.keys()) : [],
+    now,
+    details,
   });
 }
 

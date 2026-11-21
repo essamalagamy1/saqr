@@ -147,13 +147,14 @@ class CameraWorker {
     return new Promise((resolve, reject) => {
       const ffmpegExe = resolveFfmpegPath();
       const args = [
-        // 1. Force reliable TCP transport
+        // 1. Force reliable TCP transport with 5-second socket timeout
         '-rtsp_transport', 'tcp',
+        '-stimeout', '5000000',
         // 2. Discard corrupted network packets
         '-fflags', '+discardcorrupt',
-        // 3. Generous buffer to handle 4K / high-bitrate cameras
-        '-analyzeduration', '4000000',
-        '-probesize', '8000000',
+        // 3. Fast buffer analysis for low latency and minimal RAM usage
+        '-analyzeduration', '1000000',
+        '-probesize', '2000000',
         '-i', rtspUrl,
       ];
 
@@ -167,7 +168,7 @@ class CameraWorker {
         '-vf', "select='eq(pict_type\\,I)',scale='min(1920,iw)':-2",
         '-frames:v', '1',
         '-vsync', 'vfr',
-        '-q:v', '2',
+        '-q:v', '3',
         '-f', 'image2pipe',
         '-vcodec', 'mjpeg',
         'pipe:1'
@@ -189,7 +190,13 @@ class CameraWorker {
       proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
 
       const timer = setTimeout(() => {
-        try { proc.kill('SIGKILL'); } catch {}
+        try {
+          if (process.platform === 'win32' && proc.pid) {
+            spawn('taskkill', ['/pid', String(proc.pid), '/f', '/t']);
+          } else {
+            proc.kill('SIGKILL');
+          }
+        } catch {}
         reject(new Error('انتهت مهلة قراءة إطار الفيديو من الكاميرا (Frame capture timeout)'));
       }, timeoutMs);
 
@@ -346,19 +353,34 @@ class CameraWorker {
       this.stopCapture(cameraId);
     }
 
+    let isCapturing = false;
+    let isActive = true;
+
     const captureLoop = async () => {
+      if (isCapturing || !isActive) return;
+      isCapturing = true;
       try {
-        const frame = await this.captureFrameWithValidation(rtspUrl);
-        onFrame(cameraId, frame);
+        const frame = await this.captureFrameWithValidation(rtspUrl, 8000);
+        if (isActive) onFrame(cameraId, frame);
       } catch (err) {
-        onFrame(cameraId, null, err);
+        if (isActive) onFrame(cameraId, null, err);
+      } finally {
+        isCapturing = false;
       }
     };
 
-    // Run immediately then at interval
+    // Stagger initial capture and enforce non-overlapping intervals
     captureLoop();
-    const timer = setInterval(captureLoop, intervalSeconds * 1000);
-    this.processes.set(cameraId, { timer, rtspUrl });
+    const intervalMs = Math.max(2, intervalSeconds || 3) * 1000;
+    const timer = setInterval(captureLoop, intervalMs);
+    this.processes.set(cameraId, {
+      timer,
+      rtspUrl,
+      stop: () => {
+        isActive = false;
+        clearInterval(timer);
+      }
+    });
   }
 
   /**
@@ -367,7 +389,8 @@ class CameraWorker {
   stopCapture(cameraId) {
     const proc = this.processes.get(cameraId);
     if (proc) {
-      clearInterval(proc.timer);
+      if (typeof proc.stop === 'function') proc.stop();
+      else if (proc.timer) clearInterval(proc.timer);
       this.processes.delete(cameraId);
     }
   }
