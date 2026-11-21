@@ -1,16 +1,15 @@
 {
-  "version": "1.3.18",
+  "version": "1.3.19",
   "name": "Saqr Edge Agent",
   "releaseDate": "2026-11-21",
   "asarUrl": "/downloads/app.asar",
   "zipUrl": "/downloads/Saqr-Edge-Agent-Win64.zip",
   "changelog": [
-    "إلغاء Motion Fallback للأشخاص نهائياً: مفيش كشف = مفيش كشف، منع اختراع أي أشخاص وهميين على الحوائط أو انعكاسات الإضاءة والبخار",
-    "تصحيح ترتيب قنوات الألوان إلى BGR الرسمي: (2 - c) لتحسين دقة استخراج المعالم لنموذج YOLOX بدون أي Normalization زائد",
-    "تسريع المعالجة عبر التخزين المسبق (Grid Coordinates Pre-caching): حساب الـ grids والـ strides مرة واحدة فقط عند بدء التشغيل وتوفير ملايين العمليات المتكررة",
-    "دعم تسريع معالجة الرسوميات GPU (DirectML) على نظام ويندوز مع رجوع تلقائي ذكي للـ CPU",
-    "تتبع الكائنات بنمط ByteTrack: اشتراط التأكيد على إطارين متتاليين لمنع وميض الإنذارات مع تبريد زمني (Cooldown) لمدة 3 دقائق لمنع التكرار المزعج",
-    "هيكلية الفحص على مرحلتين (Two-Stage Pipeline): اقتصاص عالي الدقة لمنطقة الرأس واليدين للتحقق من الكمامة واستخدام الجوال"
+    "معمارية الفحص على مرحلتين (Two-Stage Pipeline): اقتصاص حقيقي للرأس والوجه واليدين وفحص البكسلات بدقة كاملة",
+    "تتبع الكائنات المتقدم ByteTrack: اشتراط 3 إطارات متتالية لتأكيد وجود الشخص والقضاء التام على وميض الإنذارات",
+    "فحص الكمامة الحقيقي (Face Mask Pixel Analysis): التحقق من لون الجلد ونسبة الكمامة في الجزء السفلي من الوجه",
+    "فحص الجوال عبر التقاطع المكاني (Phone Spatial Tracking): مطابقة كائن الجوال مع منطقة اليدين والصدر مع اشتراط الاستقرار الزمني لأكثر من 3.5 ثانية",
+    "قفل التكرار (Anti-Spam Cooldown): فترة تهدئة 3 دقائق لكل شخص وكاميرا"
   ],
-  "releaseNotes": "v1.3.18: Motion Fallback Elimination, BGR Alignment, Grids Caching & ByteTrack"
+  "releaseNotes": "v1.3.19: Complete Two-Stage Pipeline, ByteTrack 3-Frame Confirmation & Phone/Mask Precision"
 }

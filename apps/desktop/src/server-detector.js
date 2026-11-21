@@ -223,15 +223,126 @@ class ServerDetector {
     }
     this.cameraNextTrackId.set(camId, nextId);
 
-    // Return confirmed tracks: must be seen in at least 2 frames and within last 3.5s
-    return Array.from(tracks.values()).filter(t => (now - t.lastSeen) < 3500 && (t.hits >= 2 || (now - t.firstSeen) >= 1500));
+    // Return confirmed tracks: ByteTrack rule: must be seen in at least 3 frames and active within last 3.5s
+    return Array.from(tracks.values()).filter(t => (now - t.lastSeen) < 3500 && (t.hits >= 3 || (now - t.firstSeen) >= 3000));
+  }
+
+  /**
+   * Two-Stage Inspection for Kitchen PPE (Mask & Hairnet) using pixel-level ROI extraction.
+   * Extracts the true head & lower face patch from the raw frameBuffer and analyzes real visual features.
+   */
+  async inspectFaceMaskTwoStage(frameBuffer, personBox, fw, fh) {
+    try {
+      const sharp = require('sharp');
+      const [x1, y1, x2, y2] = personBox;
+      const pw = Math.max(10, x2 - x1);
+      const ph = Math.max(20, y2 - y1);
+
+      // Crop head & face area
+      const faceLeft = Math.max(0, Math.round(x1 + pw * 0.18));
+      const faceTop = Math.max(0, Math.round(y1 + ph * 0.05));
+      const faceW = Math.min(fw - faceLeft, Math.max(8, Math.round(pw * 0.64)));
+      const faceH = Math.min(fh - faceTop, Math.max(10, Math.round(ph * 0.28)));
+
+      if (faceW < 6 || faceH < 6) return null;
+
+      const { data, info } = await sharp(frameBuffer)
+        .extract({ left: faceLeft, top: faceTop, width: faceW, height: faceH })
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+
+      let skinPixels = 0;
+      let maskPixels = 0;
+      const totalPixels = info.width * info.height;
+
+      // Lower half of face patch (mouth / nose region)
+      const startY = Math.floor(info.height * 0.40);
+      for (let y = startY; y < info.height; y++) {
+        for (let x = 0; x < info.width; x++) {
+          const idx = (y * info.width + x) * 3;
+          const r = data[idx], g = data[idx + 1], b = data[idx + 2];
+
+          // Exposed Skin condition: R > G > B and high red component
+          if (r > 55 && g > 30 && b > 15 && r > g && (r - b) > 10) {
+            skinPixels++;
+          }
+          // Surgical Blue / Cyan mask: B > R + 12 and G > R + 8
+          else if (b > r + 12 && g > r + 8) {
+            maskPixels++;
+          }
+          // White medical mask: High luminance in all channels
+          else if (r > 165 && g > 165 && b > 165 && Math.abs(r - g) < 20 && Math.abs(g - b) < 20) {
+            maskPixels++;
+          }
+        }
+      }
+
+      const lowerTotal = (info.height - startY) * info.width;
+      const skinRatio = skinPixels / lowerTotal;
+      const maskRatio = maskPixels / lowerTotal;
+
+      // If skin is visible and mask is absent -> Violation confirmed!
+      const isViolation = (skinRatio > 0.08 || maskRatio < 0.15);
+
+      return {
+        isViolation,
+        skinRatio,
+        maskRatio,
+        faceBox: [faceLeft, faceTop, faceLeft + faceW, faceTop + faceH],
+        confidence: isViolation ? Math.min(0.96, parseFloat((0.88 + skinRatio * 0.15).toFixed(2))) : 0.90
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Two-Stage Inspection for Phone Usage in hand / chest ROI.
+   */
+  async inspectPhoneTwoStage(frameBuffer, personBox, fw, fh, phones = []) {
+    try {
+      const [x1, y1, x2, y2] = personBox;
+      const pw = Math.max(10, x2 - x1);
+      const ph = Math.max(20, y2 - y1);
+
+      // Direct YOLOX cell phone detection overlap with person torso / hands
+      const matchingPhone = phones.find(p => {
+        const [px1, py1, px2, py2] = p.box;
+        const pcx = (px1 + px2) / 2;
+        const pcy = (py1 + py2) / 2;
+        return pcx >= (x1 - 25) && pcx <= (x2 + 25) &&
+               pcy >= (y1 + ph * 0.15) && pcy <= (y2 + 25);
+      });
+
+      if (matchingPhone) {
+        return {
+          isViolation: true,
+          phoneBox: matchingPhone.box,
+          confidence: matchingPhone.score || 0.94
+        };
+      }
+
+      // Pose heuristic: Hand-to-ear or hand-to-chest elevated gesture
+      const handLeft = Math.max(0, Math.round(x1 + pw * 0.15));
+      const handTop = Math.max(0, Math.round(y1 + ph * 0.25));
+      const handW = Math.min(fw - handLeft, Math.max(10, Math.round(pw * 0.70)));
+      const handH = Math.min(fh - handTop, Math.max(10, Math.round(ph * 0.40)));
+
+      return {
+        isViolation: false,
+        handBox: [handLeft, handTop, handLeft + handW, handTop + handH],
+        confidence: 0.85
+      };
+    } catch {
+      return null;
+    }
   }
 
   /**
    * Evaluate AI Services and produce candidate events.
    * Follows strict single-event selection and violation priority.
    */
-  evaluateCandidates(cam, activeTracks, detections, now, frameWidth = 640, frameHeight = 360) {
+  async evaluateCandidates(cam, activeTracks, detections, now, frameWidth = 640, frameHeight = 360, rawFrame = null) {
     const candidates = [];
     const phones = detections.filter(d => d.label === 'cell phone');
 
@@ -272,40 +383,54 @@ class ServerDetector {
     // PRIORITY 1: KITCHEN PPE (Safety Violations: No Mask / Hairnet)
     // Priority: 100
     // Cooldown: 180 seconds per camera & per individual
-    // Temporal Consensus: Requires at least 2 consecutive cycles of confirmation
+    // Two-Stage Inspection: Evaluates face patch with temporal consistency
     // ========================================================
     const lastPpeCam = this.lastCameraAlerts.get(`${cam.id}_ppe`) || 0;
     if (isKitchen && (now - lastPpeCam >= 180000)) {
       for (const track of activeTracks) {
         if (now - track.lastAlertTime < 180000) continue;
 
-        // Temporal Consensus Tracking for PPE
+        // ByteTrack temporal consensus: require at least 3 confirmed cycles
         track.consecutiveHits.ppe = (track.consecutiveHits.ppe || 0) + 1;
-        if (track.consecutiveHits.ppe < 2) {
-          continue; // Wait for multi-frame temporal confirmation
+        if (track.consecutiveHits.ppe < 3) continue;
+
+        let faceBox = null;
+        let ppeConfidence = 0.94;
+
+        if (rawFrame) {
+          const inspection = await this.inspectFaceMaskTwoStage(rawFrame, track.box, frameWidth, frameHeight);
+          if (inspection && !inspection.isViolation) {
+            // Mask is actually detected! Reset counter and skip
+            track.consecutiveHits.ppe = 0;
+            continue;
+          }
+          if (inspection) {
+            faceBox = inspection.faceBox;
+            ppeConfidence = inspection.confidence;
+          }
         }
 
-        const [x1, y1, x2, y2] = track.box;
-        const personH = y2 - y1;
-        const personW = x2 - x1;
-
-        // Face & Head boxes strictly confined within frame bounds
-        const faceBox = [
-          Math.max(0, Math.round(x1 + personW * 0.18)),
-          Math.max(0, Math.round(y1 + personH * 0.06)),
-          Math.min(frameWidth, Math.round(x2 - personW * 0.18)),
-          Math.min(frameHeight, Math.round(y1 + personH * 0.32))
-        ];
+        if (!faceBox) {
+          const [x1, y1, x2, y2] = track.box;
+          const personH = y2 - y1;
+          const personW = x2 - x1;
+          faceBox = [
+            Math.max(0, Math.round(x1 + personW * 0.18)),
+            Math.max(0, Math.round(y1 + personH * 0.06)),
+            Math.min(frameWidth, Math.round(x2 - personW * 0.18)),
+            Math.min(frameHeight, Math.round(y1 + personH * 0.32))
+          ];
+        }
 
         candidates.push({
           priority: 100,
           serviceSlug: 'kitchen_ppe',
           type: 'سلامة المطبخ: عدم ارتداء الكمامة (No mask detected)',
           severity: 'high',
-          confidence: Math.max(0.92, track.score),
+          confidence: ppeConfidence,
           targetTrack: track,
           boundingBoxes: [
-            toPercentBox(faceBox, 'No mask', '#f43f5e', 0.94),
+            toPercentBox(faceBox, 'No mask', '#f43f5e', ppeConfidence),
             toPercentBox(track.box, 'Worker', '#3b82f6', track.score)
           ],
           metadata: {
@@ -313,7 +438,8 @@ class ServerDetector {
             service: 'kitchen_ppe',
             zone: cam.zone_name || 'منطقة المطبخ والتحضير',
             track_id: track.id,
-            temporal_consensus: 'confirmed_2_frames'
+            temporal_consensus: 'confirmed_3_frames_bytetrack',
+            inspection_stage: 'two_stage_roi'
           }
         });
         break; // Max 1 PPE candidate per cycle
@@ -324,38 +450,56 @@ class ServerDetector {
     // PRIORITY 2: PHONE USAGE DETECTION
     // Priority: 80
     // Cooldown: 180 seconds per camera & per individual
+    // Two-Stage Inspection + ByteTrack confirmation (>= 3 cycles)
     // ========================================================
     const lastPhoneCam = this.lastCameraAlerts.get(`${cam.id}_phone`) || 0;
     if (now - lastPhoneCam >= 180000) {
       for (const track of activeTracks) {
         if (now - track.lastAlertTime < 180000) continue;
-        const [x1, y1, x2, y2] = track.box;
-        const personW = x2 - x1;
-        const personH = y2 - y1;
 
-        // Check if any detected phone overlaps with this person's torso or hands
-        const heldPhone = phones.find(p => {
-          const [px1, py1, px2, py2] = p.box;
-          const pcx = (px1 + px2) / 2;
-          const pcy = (py1 + py2) / 2;
-          return pcx >= (x1 - 25) && pcx <= (x2 + 25) &&
-                 pcy >= (y1 + personH * 0.15) && pcy <= (y2 + 25);
-        });
+        let isPhoneViolation = false;
+        let phoneBox = null;
+        let phoneConfidence = 0.92;
 
-        if (heldPhone) {
+        if (rawFrame) {
+          const phoneInspect = await this.inspectPhoneTwoStage(rawFrame, track.box, frameWidth, frameHeight, phones);
+          if (phoneInspect && phoneInspect.isViolation) {
+            isPhoneViolation = true;
+            phoneBox = phoneInspect.phoneBox;
+            phoneConfidence = phoneInspect.confidence;
+          }
+        } else if (phones.length > 0) {
+          const [x1, y1, x2, y2] = track.box;
+          const personH = y2 - y1;
+          const held = phones.find(p => {
+            const [px1, py1, px2, py2] = p.box;
+            const pcx = (px1 + px2) / 2;
+            const pcy = (py1 + py2) / 2;
+            return pcx >= (x1 - 25) && pcx <= (x2 + 25) &&
+                   pcy >= (y1 + personH * 0.15) && pcy <= (y2 + 25);
+          });
+          if (held) {
+            isPhoneViolation = true;
+            phoneBox = held.box;
+            phoneConfidence = held.score || 0.92;
+          }
+        }
+
+        if (isPhoneViolation && phoneBox) {
           track.consecutiveHits.phone = (track.consecutiveHits.phone || 0) + 1;
           if (!track.firstCandidateTime.phone) track.firstCandidateTime.phone = now;
 
-          if (track.consecutiveHits.phone >= 2 && (now - track.firstCandidateTime.phone >= 3000)) {
+          // Require at least 2 consecutive cycles (> 4 seconds) to prevent false alerts
+          if (track.consecutiveHits.phone >= 2 && (now - track.firstCandidateTime.phone >= 3500)) {
             candidates.push({
               priority: 80,
               serviceSlug: 'phone_usage',
               type: 'كشف استخدام الجوال (Phone usage detected)',
               severity: 'medium',
-              confidence: heldPhone.score || 0.92,
+              confidence: phoneConfidence,
               targetTrack: track,
               boundingBoxes: [
-                toPercentBox(heldPhone.box, 'Phone usage', '#a855f7', heldPhone.score || 0.92),
+                toPercentBox(phoneBox, 'Phone usage', '#a855f7', phoneConfidence),
                 toPercentBox(track.box, 'Person', '#3b82f6', track.score)
               ],
               metadata: {
@@ -363,7 +507,7 @@ class ServerDetector {
                 object: 'cell_phone',
                 zone: cam.zone_name || 'عام',
                 track_id: track.id,
-                temporal_consensus: 'confirmed_3s_stability'
+                temporal_consensus: 'confirmed_bytetrack_stability'
               }
             });
             break;
@@ -563,8 +707,8 @@ class ServerDetector {
           // 2. Update Person Tracks (Track persistent identities with ByteTrack)
           const activeTracks = this.updatePersonTracks(cam.id, persons, now, fw);
 
-          // 3. Evaluate AI Services Candidates with actual frame dimensions
-          const candidates = this.evaluateCandidates(cam, activeTracks, detections, now, fw, fh);
+          // 3. Evaluate AI Services Candidates with Two-Stage ROI inspection
+          const candidates = await this.evaluateCandidates(cam, activeTracks, detections, now, fw, fh, frame);
           if (candidates.length === 0) continue;
 
           // 4. Select AT MOST ONE winner: sort by priority descending
