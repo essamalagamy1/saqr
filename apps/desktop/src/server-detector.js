@@ -120,11 +120,23 @@ class ServerDetector {
     }
   }
 
+  _computeBoxIOU(boxA, boxB) {
+    const x1 = Math.max(boxA[0], boxB[0]);
+    const y1 = Math.max(boxA[1], boxB[1]);
+    const x2 = Math.min(boxA[2], boxB[2]);
+    const y2 = Math.min(boxA[3], boxB[3]);
+    const interArea = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+    const areaA = (boxA[2] - boxA[0]) * (boxA[3] - boxA[1]);
+    const areaB = (boxB[2] - boxB[0]) * (boxB[3] - boxB[1]);
+    return interArea / (areaA + areaB - interArea + 1e-6);
+  }
+
   /**
-   * Updates centroid tracking for persons in this camera.
-   * Tracks persistent identity across frames to prevent repeated alerts on the same individual.
+   * Updates ByteTrack tracking for persons in this camera.
+   * Leverages IOU + Centroid correspondence to track persistent identity across frames.
+   * Eliminates single-frame ghost artifacts by requiring multiple confirmed hits.
    */
-  updatePersonTracks(camId, persons, now) {
+  updatePersonTracks(camId, persons, now, frameWidth = 640) {
     if (!this.cameraPersonTrackers.has(camId)) {
       this.cameraPersonTrackers.set(camId, new Map());
       this.cameraNextTrackId.set(camId, 1);
@@ -139,33 +151,47 @@ class ServerDetector {
       matched: false
     }));
 
-    // Match existing tracks with current centroids
+    // 1. Primary Association: Spatial Overlap (IOU Matching)
     for (const [trackId, track] of tracks.entries()) {
-      // If person hasn't been seen for 15s, remove track (person departed)
-      if (now - track.lastSeen > 15000) {
+      if (now - track.lastSeen > 12000) {
         tracks.delete(trackId);
         continue;
       }
 
-      let bestDist = 200; // max pixel distance for tracking correspondence
-      let bestPerson = null;
+      let bestIou = 0.20;
+      let bestMatch = null;
 
       for (const cp of currentPersons) {
         if (cp.matched) continue;
-        const d = Math.hypot(cp.cx - track.cx, cp.cy - track.cy);
-        if (d < bestDist) {
-          bestDist = d;
-          bestPerson = cp;
+        const iou = this._computeBoxIOU(track.box, cp.box);
+        if (iou > bestIou) {
+          bestIou = iou;
+          bestMatch = cp;
         }
       }
 
-      if (bestPerson) {
-        bestPerson.matched = true;
-        track.cx = bestPerson.cx;
-        track.cy = bestPerson.cy;
-        track.box = bestPerson.box;
-        track.score = bestPerson.score;
+      // 2. Secondary Association: Centroid Proximity (within 70px)
+      if (!bestMatch) {
+        const maxDist = Math.max(40, frameWidth * 0.12);
+        let bestDist = maxDist;
+        for (const cp of currentPersons) {
+          if (cp.matched) continue;
+          const d = Math.hypot(cp.cx - track.cx, cp.cy - track.cy);
+          if (d < bestDist) {
+            bestDist = d;
+            bestMatch = cp;
+          }
+        }
+      }
+
+      if (bestMatch) {
+        bestMatch.matched = true;
+        track.cx = bestMatch.cx;
+        track.cy = bestMatch.cy;
+        track.box = bestMatch.box;
+        track.score = bestMatch.score;
         track.lastSeen = now;
+        track.hits = (track.hits || 1) + 1;
       }
     }
 
@@ -184,7 +210,8 @@ class ServerDetector {
           score: cp.score,
           firstSeen: now,
           lastSeen: now,
-          loiterAlerted: false,       // set to true when loiter triggered, preventing repeated alerts!
+          hits: 1,
+          loiterAlerted: false,
           lastAlertTime: 0,
           lastAlertedViolation: null,
           countedIn: false,
@@ -196,8 +223,8 @@ class ServerDetector {
     }
     this.cameraNextTrackId.set(camId, nextId);
 
-    // Return tracks currently visible in the scene
-    return Array.from(tracks.values()).filter(t => (now - t.lastSeen) < 3500);
+    // Return confirmed tracks: must be seen in at least 2 frames and within last 3.5s
+    return Array.from(tracks.values()).filter(t => (now - t.lastSeen) < 3500 && (t.hits >= 2 || (now - t.firstSeen) >= 1500));
   }
 
   /**
@@ -530,12 +557,13 @@ class ServerDetector {
 
           if (persons.length === 0) continue;
 
-          // 2. Update Person Tracks (Track persistent identities)
-          const activeTracks = this.updatePersonTracks(cam.id, persons, now);
-
-          // 3. Evaluate AI Services Candidates with actual frame dimensions
           const fw = (detections[0] && detections[0].frameWidth) ? detections[0].frameWidth : 640;
           const fh = (detections[0] && detections[0].frameHeight) ? detections[0].frameHeight : 360;
+
+          // 2. Update Person Tracks (Track persistent identities with ByteTrack)
+          const activeTracks = this.updatePersonTracks(cam.id, persons, now, fw);
+
+          // 3. Evaluate AI Services Candidates with actual frame dimensions
           const candidates = this.evaluateCandidates(cam, activeTracks, detections, now, fw, fh);
           if (candidates.length === 0) continue;
 

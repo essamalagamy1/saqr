@@ -39,27 +39,34 @@ class ObjectTracker {
       }
 
       if (matchedTrack) {
-        // Persistent object — update position and lastSeen
+        // Persistent object — update position, lastSeen, and hit counter
         matchedTrack.lastSeen = now;
         matchedTrack.box = det.box;
+        matchedTrack.hits = (matchedTrack.hits || 1) + 1;
 
-        // Re-alert only if cooldown expired
-        if (now - matchedTrack.lastAlerted >= this.reAlertIntervalMs) {
+        // Multi-frame confirmation: trigger alert on second confirmed hit
+        if (matchedTrack.hits === 2 && !matchedTrack.alertedFirst) {
+          matchedTrack.alertedFirst = true;
+          matchedTrack.lastAlerted = now;
+          newEvents.push(det);
+        } else if (matchedTrack.alertedFirst && (now - matchedTrack.lastAlerted >= this.reAlertIntervalMs)) {
+          // Cooldown expired — send periodic reminder
           matchedTrack.lastAlerted = now;
           newEvents.push(det);
         }
       } else {
-        // Genuinely new object appeared in scene!
+        // First sighting: register candidate track and wait for 2nd frame confirmation (ByteTrack rule)
         const newTrack = {
           id: Math.random().toString(36).slice(2, 9),
           label: det.label,
           box: det.box,
           firstSeen: now,
           lastSeen: now,
-          lastAlerted: now,
+          lastAlerted: 0,
+          hits: 1,
+          alertedFirst: false,
         };
         cameraTracks.push(newTrack);
-        newEvents.push(det);
       }
     }
 

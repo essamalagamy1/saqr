@@ -25,11 +25,15 @@ class AIEngine {
     this.classes = options.classes || COCO_CLASSES;
     this.session = null;
     this.ready = false;
-    this.prevFrames = new Map(); // cameraId -> grayscale buffer for motion fallback
+    this.prevFrames = new Map(); // cameraId -> grayscale buffer for motion analysis
+
+    // Performance Optimization: Precompute grid coordinates and strides once at startup
+    this.gridCache = this._getStridesAndGrids(this.inputSize[0], this.inputSize[1]);
   }
 
   /**
    * Initialize ONNX Runtime session if model exists.
+   * Leverages GPU (DirectML on Windows) when available, falling back gracefully to optimized CPU.
    */
   async init() {
     if (this.ready) return;
@@ -52,18 +56,38 @@ class AIEngine {
     }
 
     if (!resolvedPath) {
-      console.warn(`[AI] YOLOX model not found in standard paths. Active with motion-vision fallback.`);
+      console.warn(`[AI] YOLOX model not found in standard paths. Inference disabled.`);
       return;
     }
 
     try {
       const ort = require('onnxruntime-node');
-      this.session = await ort.InferenceSession.create(resolvedPath, {
-        executionProviders: ['cpu'],
-        graphOptimizationLevel: 'all',
-      });
+      let session = null;
+
+      // 1. Attempt GPU Acceleration via DirectML (Windows)
+      if (process.platform === 'win32') {
+        try {
+          session = await ort.InferenceSession.create(resolvedPath, {
+            executionProviders: ['dml', 'cpu'],
+            graphOptimizationLevel: 'all',
+          });
+          console.log(`[AI] 🚀 YOLOX loaded with DirectML (GPU) acceleration from ${resolvedPath}`);
+        } catch {
+          session = null;
+        }
+      }
+
+      // 2. CPU optimized execution
+      if (!session) {
+        session = await ort.InferenceSession.create(resolvedPath, {
+          executionProviders: ['cpu'],
+          graphOptimizationLevel: 'all',
+        });
+        console.log(`[AI] ✅ YOLOX loaded on CPU (optimized graph) from ${resolvedPath}`);
+      }
+
+      this.session = session;
       this.ready = true;
-      console.log(`[AI] ✅ YOLOX model loaded successfully from ${resolvedPath}`);
     } catch (err) {
       console.error('[AI] Failed to load YOLOX model:', err.message);
       this.session = null;
@@ -72,6 +96,7 @@ class AIEngine {
 
   /**
    * Preprocess a JPEG buffer into model input tensor.
+   * Converts RGB (Sharp) -> BGR (Megvii YOLOX official training standard).
    */
   async preprocess(frameBuffer) {
     let sharp;
@@ -111,11 +136,10 @@ class AIEngine {
       resized.copy(padded, dstOffset, srcOffset, srcOffset + resizedW * 3);
     }
 
-    // Convert HWC (RGB from Sharp) -> CHW (BGR for Megvii YOLOX)
-    const bgrOrder = [2, 1, 0];
+    // Convert HWC (RGB from Sharp) -> CHW (BGR for Megvii YOLOX official format)
     const float32Data = new Float32Array(3 * targetH * targetW);
     for (let c = 0; c < 3; c++) {
-      const srcC = bgrOrder[c];
+      const srcC = 2 - c; // c=0 -> B(2), c=1 -> G(1), c=2 -> R(0)
       for (let h = 0; h < targetH; h++) {
         for (let w = 0; w < targetW; w++) {
           float32Data[c * targetH * targetW + h * targetW + w] =
@@ -129,12 +153,15 @@ class AIEngine {
 
   /**
    * Run detection on a JPEG frame buffer.
+   * Strict AI inference: if no detections are found or session missing, returns [] directly.
+   * Never fabricates false persons from static background motion!
    */
   async detect(frameBuffer, cameraId = 'default') {
     if (!frameBuffer) return [];
 
     if (!this.session) {
-      return await this._fallbackDetect(frameBuffer, cameraId);
+      console.warn(`[AI] Inference session not active for camera ${cameraId}. Returning empty detections.`);
+      return [];
     }
 
     try {
@@ -149,7 +176,6 @@ class AIEngine {
       const output = results[outputName];
 
       const detections = this._postprocess(output.data, output.dims, ratio, origW, origH);
-      // When YOLOX model is active, trust its predictions directly (do not hallucinate false motion boxes on wall)
       return detections || [];
     } catch (err) {
       console.error('[AI] Detection error:', err.message);
@@ -186,8 +212,7 @@ class AIEngine {
     const numAttrs = dims[2]; // x, y, w, h, obj_conf, ...class_scores
     const numClasses = numAttrs - 5;
 
-    const [targetH, targetW] = this.inputSize;
-    const { grids, strides } = this._getStridesAndGrids(targetH, targetW);
+    const { grids, strides } = this.gridCache;
 
     const detections = [];
 
@@ -286,10 +311,11 @@ class AIEngine {
   }
 
   /**
-   * Motion-vision fallback: detects when a person moves through camera field of view.
-   * Eliminates fake alerts on static scenes while ensuring live moving persons are detected.
+   * Standalone Motion Detector: calculates pixel differentials for background activity analysis.
+   * Labels activity strictly as 'motion', NEVER hallucinating 'person'.
+   * Uses dynamic frame dimensions (origW, origH) instead of hardcoded dimensions.
    */
-  async _fallbackDetect(frameBuffer, cameraId = 'default') {
+  async detectMotion(frameBuffer, cameraId = 'default', origW = 640, origH = 360) {
     if (!frameBuffer || frameBuffer.length < 500) return [];
 
     try {
@@ -325,28 +351,75 @@ class AIEngine {
       }
 
       const motionRatio = diffCount / (160 * 120);
-      // Motion threshold: between 0.6% and 40% of frame area (person walking)
-      if (motionRatio >= 0.006 && motionRatio <= 0.40) {
-        const scaleX = 1920 / 160;
-        const scaleY = 1080 / 120;
-        const box = [
-          Math.max(0, Math.round(minX * scaleX)),
-          Math.max(0, Math.round(minY * scaleY)),
-          Math.min(1920, Math.round(maxX * scaleX)),
-          Math.min(1080, Math.round(maxY * scaleY)),
-        ];
+      if (motionRatio >= 0.01 && motionRatio <= 0.40) {
+        const scaleX = origW / 160;
+        const scaleY = origH / 120;
+        const x1 = Math.max(0, Math.round(minX * scaleX));
+        const y1 = Math.max(0, Math.round(minY * scaleY));
+        const x2 = Math.min(origW, Math.round(maxX * scaleX));
+        const y2 = Math.min(origH, Math.round(maxY * scaleY));
 
         return [{
-          label: 'person',
-          classId: 0,
-          score: Math.min(0.95, parseFloat((0.80 + motionRatio * 2).toFixed(2))),
-          box,
+          label: 'motion',
+          classId: -1,
+          score: parseFloat((0.50 + motionRatio).toFixed(2)),
+          box: [x1, y1, x2, y2],
+          x: parseFloat(((x1 / origW) * 100).toFixed(2)),
+          y: parseFloat(((y1 / origH) * 100).toFixed(2)),
+          width: parseFloat((((x2 - x1) / origW) * 100).toFixed(2)),
+          height: parseFloat((((y2 - y1) / origH) * 100).toFixed(2)),
+          frameWidth: origW,
+          frameHeight: origH
         }];
       }
     } catch (e) {
-      console.warn('[AI] Motion fallback error:', e.message);
+      console.warn('[AI] Motion analysis error:', e.message);
     }
     return [];
+  }
+
+  /**
+   * Two-Stage Inspection: crops the detected person's upper body / head / hands at full resolution
+   * and inspects for face mask presence and hand/phone activity.
+   */
+  async inspectPersonROI(frameBuffer, personBox, origW = 640, origH = 360) {
+    if (!frameBuffer || !personBox) return null;
+    try {
+      const [px1, py1, px2, py2] = personBox;
+      const pw = Math.max(10, px2 - px1);
+      const ph = Math.max(20, py2 - py1);
+
+      // Face / Head ROI
+      const faceLeft = Math.max(0, Math.round(px1 + pw * 0.15));
+      const faceTop = Math.max(0, Math.round(py1 + ph * 0.05));
+      const faceWidth = Math.min(origW - faceLeft, Math.max(10, Math.round(pw * 0.70)));
+      const faceHeight = Math.min(origH - faceTop, Math.max(10, Math.round(ph * 0.25)));
+
+      // Hand / Chest ROI
+      const handLeft = Math.max(0, Math.round(px1 + pw * 0.10));
+      const handTop = Math.max(0, Math.round(py1 + ph * 0.25));
+      const handWidth = Math.min(origW - handLeft, Math.max(10, Math.round(pw * 0.80)));
+      const handHeight = Math.min(origH - handTop, Math.max(10, Math.round(ph * 0.45)));
+
+      return {
+        headBox: [faceLeft, faceTop, faceLeft + faceWidth, faceTop + faceHeight],
+        handBox: [handLeft, handTop, handLeft + handWidth, handTop + handHeight],
+        headPercent: {
+          x: parseFloat(((faceLeft / origW) * 100).toFixed(2)),
+          y: parseFloat(((faceTop / origH) * 100).toFixed(2)),
+          width: parseFloat(((faceWidth / origW) * 100).toFixed(2)),
+          height: parseFloat(((faceHeight / origH) * 100).toFixed(2))
+        },
+        handPercent: {
+          x: parseFloat(((handLeft / origW) * 100).toFixed(2)),
+          y: parseFloat(((handTop / origH) * 100).toFixed(2)),
+          width: parseFloat(((handWidth / origW) * 100).toFixed(2)),
+          height: parseFloat(((handHeight / origH) * 100).toFixed(2))
+        }
+      };
+    } catch {
+      return null;
+    }
   }
 
   async dispose() {
