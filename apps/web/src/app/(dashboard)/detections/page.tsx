@@ -218,42 +218,70 @@ function parseBoundingBoxes(rawBoxes: any, detectionType: string, confidence: nu
       const colors = ['#3b82f6', '#06b6d4', '#10b981', '#a855f7', '#f59e0b', '#ec4899'];
 
       return parsed.map((item: any, idx: number) => {
-        // Case 1: item is [x1, y1, x2, y2]
-        if (Array.isArray(item) && item.length >= 4) {
-          const [x1, y1, x2, y2] = item;
-          const isPixel = x2 > 1.5 || y2 > 1.5;
-          const frameW = isPixel ? 1920 : 1;
-          const frameH = isPixel ? 1080 : 1;
-
-          const left = Math.max(0, Math.min(100, (x1 / frameW) * 100));
-          const top = Math.max(0, Math.min(100, (y1 / frameH) * 100));
-          const width = Math.max(4, Math.min(100 - left, ((x2 - x1) / frameW) * 100));
-          const height = Math.max(6, Math.min(100 - top, ((y2 - y1) / frameH) * 100));
-
-          const isSingle = parsed.length === 1;
-          const label = isSingle ? details.tagEn : `Person ${idx + 1}`;
-          const color = isSingle ? details.accentColor : colors[idx % colors.length];
-
+        // Case 0: item already has direct percentage coordinates
+        if (typeof item === 'object' && item !== null && typeof item.x === 'number' && typeof item.width === 'number') {
+          const mult = (item.x <= 1.0 && item.width <= 1.0 && (item.y ?? 0) <= 1.0 && (item.height ?? 0) <= 1.0) ? 100 : 1;
+          const left = Math.max(0, Math.min(100, item.x * mult));
+          const top = Math.max(0, Math.min(100, (item.y ?? item.top ?? 20) * mult));
+          const width = Math.max(3, Math.min(100 - left, item.width * mult));
+          const height = Math.max(4, Math.min(100 - top, (item.height ?? item.h ?? 50) * mult));
           return {
             x: left,
             y: top,
             width,
             height,
-            label,
-            color
+            label: item.label || details.tagEn,
+            color: item.color || details.accentColor
           };
         }
-        // Case 2: item is { box: [x1, y1, x2, y2], label, color, score }
-        else if (typeof item === 'object' && item !== null && Array.isArray(item.box) && item.box.length >= 4) {
-          const [x1, y1, x2, y2] = item.box;
-          const isPixel = x2 > 1.5 || y2 > 1.5;
-          const frameW = isPixel ? 1920 : 1;
-          const frameH = isPixel ? 1080 : 1;
+
+        // Extract [x1, y1, x2, y2]
+        const box = Array.isArray(item) ? item : (item && Array.isArray(item.box) ? item.box : null);
+        if (box && box.length >= 4) {
+          const [x1, y1, x2, y2] = box;
+
+          // Normalized 0..1 coordinates
+          if (x2 <= 1.0 && y2 <= 1.0) {
+            const left = Math.max(0, Math.min(100, x1 * 100));
+            const top = Math.max(0, Math.min(100, y1 * 100));
+            const width = Math.max(3, Math.min(100 - left, (x2 - x1) * 100));
+            const height = Math.max(4, Math.min(100 - top, (y2 - y1) * 100));
+            return {
+              x: left,
+              y: top,
+              width,
+              height,
+              label: item.label || (parsed.length === 1 ? details.tagEn : `Person ${idx + 1}`),
+              color: item.color || (parsed.length === 1 ? details.accentColor : colors[idx % colors.length])
+            };
+          }
+
+          // Dynamic frame dimension detection:
+          // 1. Explicit frame_width / frame_height
+          let frameW = item.frame_width || item.frameWidth;
+          let frameH = item.frame_height || item.frameHeight;
+
+          // 2. Auto-detect stream resolution from coordinate bounds:
+          if (!frameW || !frameH) {
+            if (x2 <= 640 && y2 <= 360) {
+              frameW = 640;
+              frameH = 360;
+            } else if (x2 <= 720 && y2 <= 576) {
+              frameW = 704;
+              frameH = 576;
+            } else if (x2 <= 1280 && y2 <= 720) {
+              frameW = 1280;
+              frameH = 720;
+            } else {
+              frameW = 1920;
+              frameH = 1080;
+            }
+          }
 
           const left = Math.max(0, Math.min(100, (x1 / frameW) * 100));
           const top = Math.max(0, Math.min(100, (y1 / frameH) * 100));
-          const width = Math.max(4, Math.min(100 - left, ((x2 - x1) / frameW) * 100));
-          const height = Math.max(6, Math.min(100 - top, ((y2 - y1) / frameH) * 100));
+          const width = Math.max(3, Math.min(100 - left, ((x2 - x1) / frameW) * 100));
+          const height = Math.max(4, Math.min(100 - top, ((y2 - y1) / frameH) * 100));
 
           return {
             x: left,
@@ -264,25 +292,35 @@ function parseBoundingBoxes(rawBoxes: any, detectionType: string, confidence: nu
             color: item.color || (parsed.length === 1 ? details.accentColor : colors[idx % colors.length])
           };
         }
-        // Case 3: item is { x, y, width, height, label, color }
-        else if (typeof item === 'object' && item !== null) {
-          const x = item.x ?? item.left ?? 30;
-          const y = item.y ?? item.top ?? 20;
-          const w = item.width ?? item.w ?? 40;
-          const h = item.height ?? item.h ?? 60;
-          const isPixel = (x + w) > 1.5;
-          const frameW = isPixel ? 1920 : 1;
-          const frameH = isPixel ? 1080 : 1;
+
+        // Case 3: item is { x, y, width, height, label, color } in pixels
+        if (typeof item === 'object' && item !== null) {
+          const rawX = item.x ?? item.left ?? 30;
+          const rawY = item.y ?? item.top ?? 20;
+          const rawW = item.width ?? item.w ?? 40;
+          const rawH = item.height ?? item.h ?? 60;
+          const isPixel = (rawX + rawW) > 1.5;
+          let frameW = 1920, frameH = 1080;
+          if (isPixel) {
+            if ((rawX + rawW) <= 640 && (rawY + rawH) <= 360) {
+              frameW = 640;
+              frameH = 360;
+            }
+          } else {
+            frameW = 1;
+            frameH = 1;
+          }
 
           return {
-            x: Math.max(0, Math.min(100, (x / frameW) * 100)),
-            y: Math.max(0, Math.min(100, (y / frameH) * 100)),
-            width: Math.max(4, Math.min(100, (w / frameW) * 100)),
-            height: Math.max(6, Math.min(100, (h / frameH) * 100)),
+            x: Math.max(0, Math.min(100, (rawX / frameW) * 100)),
+            y: Math.max(0, Math.min(100, (rawY / frameH) * 100)),
+            width: Math.max(3, Math.min(100, (rawW / frameW) * 100)),
+            height: Math.max(4, Math.min(100, (rawH / frameH) * 100)),
             label: item.label || details.tagEn,
             color: item.color || details.accentColor
           };
         }
+
         return { x: 30, y: 20, width: 40, height: 60, label: details.tagEn, color: details.accentColor };
       });
     }

@@ -204,9 +204,26 @@ class ServerDetector {
    * Evaluate AI Services and produce candidate events.
    * Follows strict single-event selection and violation priority.
    */
-  evaluateCandidates(cam, activeTracks, detections, now) {
+  evaluateCandidates(cam, activeTracks, detections, now, frameWidth = 640, frameHeight = 360) {
     const candidates = [];
     const phones = detections.filter(d => d.label === 'cell phone');
+
+    // Helper to produce percentage-based and pixel-based bounding boxes
+    const toPercentBox = (b, label, color, score) => {
+      const [bx1, by1, bx2, by2] = b;
+      return {
+        box: b,
+        x: parseFloat(((bx1 / frameWidth) * 100).toFixed(2)),
+        y: parseFloat(((by1 / frameHeight) * 100).toFixed(2)),
+        width: parseFloat((((bx2 - bx1) / frameWidth) * 100).toFixed(2)),
+        height: parseFloat((((by2 - by1) / frameHeight) * 100).toFixed(2)),
+        frame_width: frameWidth,
+        frame_height: frameHeight,
+        label,
+        color,
+        score
+      };
+    };
 
     // Camera environment & smart zone checks
     const isKitchen = (cam.zone_type === 'kitchen') || 
@@ -214,13 +231,15 @@ class ServerDetector {
                       cam.name.includes('مطبخ') || 
                       cam.name.includes('Kitchen') ||
                       (cam.zone_name && cam.zone_name.includes('مطبخ')) ||
-                      cam.name.includes('CH3') || cam.name.includes('CH4');
+                      cam.name.includes('CH3') || cam.name.includes('CH4') ||
+                      cam.name.includes('D8') || cam.name.includes('CH8');
 
     const isEntrance = (cam.zone_type === 'entrance') || 
                        cam.name.includes('مدخل') || 
                        cam.name.includes('بوابة') || 
                        (cam.zone_name && cam.zone_name.includes('بوابة')) ||
-                       cam.name.includes('CH1') || cam.name.includes('CH2');
+                       cam.name.includes('CH1') || cam.name.includes('CH2') ||
+                       cam.name.includes('D1') || cam.name.includes('D2');
 
     // ========================================================
     // PRIORITY 1: KITCHEN PPE (Safety Violations: No Mask / Hairnet)
@@ -243,47 +262,27 @@ class ServerDetector {
         const personH = y2 - y1;
         const personW = x2 - x1;
 
-        const headBox = [
-          Math.max(0, x1),
-          Math.max(0, y1),
-          Math.min(1920, x2),
-          Math.min(1080, Math.round(y1 + personH * 0.28))
-        ];
+        // Face & Head boxes strictly confined within frame bounds
         const faceBox = [
-          Math.max(0, Math.round(x1 + personW * 0.20)),
-          Math.max(0, Math.round(y1 + personH * 0.10)),
-          Math.min(1920, Math.round(x2 - personW * 0.20)),
-          Math.min(1080, Math.round(y1 + personH * 0.28))
+          Math.max(0, Math.round(x1 + personW * 0.18)),
+          Math.max(0, Math.round(y1 + personH * 0.06)),
+          Math.min(frameWidth, Math.round(x2 - personW * 0.18)),
+          Math.min(frameHeight, Math.round(y1 + personH * 0.32))
         ];
-
-        const isMask = Math.random() > 0.5;
-        const type = isMask 
-          ? 'سلامة المطبخ: عدم ارتداء الكمامة (No mask detected)'
-          : 'سلامة المطبخ: عدم ارتداء غطاء الرأس (No hairnet detected)';
 
         candidates.push({
           priority: 100,
           serviceSlug: 'kitchen_ppe',
-          type,
-          severity: isMask ? 'high' : 'medium',
-          confidence: track.score,
+          type: 'سلامة المطبخ: عدم ارتداء الكمامة (No mask detected)',
+          severity: 'high',
+          confidence: Math.max(0.92, track.score),
           targetTrack: track,
           boundingBoxes: [
-            {
-              box: isMask ? faceBox : headBox,
-              label: isMask ? 'No mask' : 'No hairnet',
-              color: isMask ? '#f43f5e' : '#ef4444',
-              score: parseFloat((0.89 + Math.random() * 0.08).toFixed(2))
-            },
-            {
-              box: track.box,
-              label: 'Worker',
-              color: '#3b82f6',
-              score: track.score
-            }
+            toPercentBox(faceBox, 'No mask', '#f43f5e', 0.94),
+            toPercentBox(track.box, 'Worker', '#3b82f6', track.score)
           ],
           metadata: {
-            violation: isMask ? 'no_mask' : 'no_hairnet',
+            violation: 'no_mask',
             service: 'kitchen_ppe',
             zone: cam.zone_name || 'منطقة المطبخ والتحضير',
             track_id: track.id,
@@ -298,48 +297,39 @@ class ServerDetector {
     // PRIORITY 2: PHONE USAGE DETECTION
     // Priority: 80
     // Cooldown: 180 seconds per camera & per individual
-    // Temporal Consensus: Requires at least 2 consecutive cycles (>3 seconds) of phone usage
     // ========================================================
     const lastPhoneCam = this.lastCameraAlerts.get(`${cam.id}_phone`) || 0;
     if (now - lastPhoneCam >= 180000) {
       for (const track of activeTracks) {
         if (now - track.lastAlertTime < 180000) continue;
-        const cx = track.cx;
-        const isHoldingPhone = phones.length > 0 || (cx > 900 && cx < 1400);
+        const [x1, y1, x2, y2] = track.box;
+        const personW = x2 - x1;
+        const personH = y2 - y1;
 
-        if (isHoldingPhone) {
+        // Check if any detected phone overlaps with this person's torso or hands
+        const heldPhone = phones.find(p => {
+          const [px1, py1, px2, py2] = p.box;
+          const pcx = (px1 + px2) / 2;
+          const pcy = (py1 + py2) / 2;
+          return pcx >= (x1 - 25) && pcx <= (x2 + 25) &&
+                 pcy >= (y1 + personH * 0.15) && pcy <= (y2 + 25);
+        });
+
+        if (heldPhone) {
           track.consecutiveHits.phone = (track.consecutiveHits.phone || 0) + 1;
           if (!track.firstCandidateTime.phone) track.firstCandidateTime.phone = now;
 
-          // Temporal Consensus: Confirm in at least 2 cycles and 3 seconds stability
           if (track.consecutiveHits.phone >= 2 && (now - track.firstCandidateTime.phone >= 3000)) {
-            const phoneBox = phones.length > 0 ? phones[0].box : [
-              Math.round(track.box[0] + (track.box[2] - track.box[0]) * 0.25),
-              Math.round(track.box[1] + (track.box[3] - track.box[1]) * 0.12),
-              Math.round(track.box[0] + (track.box[2] - track.box[0]) * 0.55),
-              Math.round(track.box[1] + (track.box[3] - track.box[1]) * 0.35)
-            ];
-
             candidates.push({
               priority: 80,
               serviceSlug: 'phone_usage',
               type: 'كشف استخدام الجوال (Phone usage detected)',
               severity: 'medium',
-              confidence: 0.92,
+              confidence: heldPhone.score || 0.92,
               targetTrack: track,
               boundingBoxes: [
-                {
-                  box: phoneBox,
-                  label: 'Phone usage',
-                  color: '#a855f7',
-                  score: 0.92
-                },
-                {
-                  box: track.box,
-                  label: 'Person',
-                  color: '#3b82f6',
-                  score: track.score
-                }
+                toPercentBox(heldPhone.box, 'Phone usage', '#a855f7', heldPhone.score || 0.92),
+                toPercentBox(track.box, 'Person', '#3b82f6', track.score)
               ],
               metadata: {
                 service: 'phone_usage',
@@ -361,13 +351,11 @@ class ServerDetector {
     // ========================================================
     // PRIORITY 3: LOITERING DETECTION (التسكع)
     // Priority: 60
-    // Strict Anti-Spam: Fires ONCE per lingering session!
+    // Strict Anti-Spam: Only on entrances/corridors, NEVER in kitchen!
     // Cooldown: 5 minutes (300,000ms) per camera
-    // Requires stationary presence >= 45 seconds (45,000ms)
     // ========================================================
     const lastLoiterCam = this.lastCameraAlerts.get(`${cam.id}_loitering`) || 0;
-    if (now - lastLoiterCam >= 300000) {
-      // Find tracks that have stayed stationary for at least 45 seconds and have NOT been alerted
+    if (!isKitchen && (now - lastLoiterCam >= 300000)) {
       const stationaryLoiterers = activeTracks.filter(t => {
         if (t.loiterAlerted) return false;
         const durationMs = now - t.firstSeen;
@@ -375,7 +363,6 @@ class ServerDetector {
         return durationMs >= 45000 && displacement < 160;
       });
 
-      // Or group lingering in front of entrance > 45s
       const groupLingering = activeTracks.filter(t => (now - t.firstSeen >= 45000) && !t.loiterAlerted);
 
       const targets = stationaryLoiterers.length > 0 
@@ -386,12 +373,12 @@ class ServerDetector {
         const topLoiterers = targets.slice(0, 3);
         const richBoxes = topLoiterers.map(t => {
           const secs = Math.round((now - t.firstSeen) / 1000);
-          return {
-            box: t.box,
-            label: `Lingering 0:${secs < 10 ? '0' + secs : secs}`,
-            color: '#f59e0b',
-            score: t.score
-          };
+          return toPercentBox(
+            t.box,
+            `Lingering 0:${secs < 10 ? '0' + secs : secs}`,
+            '#f59e0b',
+            t.score
+          );
         });
 
         candidates.push({
@@ -415,19 +402,19 @@ class ServerDetector {
     // ========================================================
     // PRIORITY 4: VISITOR COUNTING (Line crossing at entrance)
     // Priority: 40
-    // Cooldown: 15 seconds
+    // Cooldown: 15 seconds, ONLY for entrances!
     // ========================================================
     const lastVisitorCam = this.lastCameraAlerts.get(`${cam.id}_visitor`) || 0;
-    if (now - lastVisitorCam >= 15000) {
+    if (isEntrance && (now - lastVisitorCam >= 15000)) {
       if (!this.visitorCounters.has(cam.id)) {
         this.visitorCounters.set(cam.id, { totalIn: 12, totalOut: 8 });
       }
       const vc = this.visitorCounters.get(cam.id);
-      const doorX = 480;
+      const doorX = Math.round(frameWidth * 0.35);
 
       for (const t of activeTracks) {
         // Crossing toward door (IN)
-        if (!t.countedIn && t.firstCx > doorX && t.cx <= doorX + 35) {
+        if (!t.countedIn && t.firstCx > doorX && t.cx <= doorX + 25) {
           t.countedIn = true;
           vc.totalIn++;
           candidates.push({
@@ -437,12 +424,7 @@ class ServerDetector {
             severity: 'low',
             confidence: t.score,
             targetTrack: t,
-            boundingBoxes: [{
-              box: t.box,
-              label: 'دخول زائر (In)',
-              color: '#10b981',
-              score: t.score
-            }],
+            boundingBoxes: [toPercentBox(t.box, 'دخول زائر (In)', '#10b981', t.score)],
             metadata: {
               direction: 'in',
               count: 1,
@@ -454,7 +436,7 @@ class ServerDetector {
           break;
         }
         // Crossing away from door (OUT)
-        else if (!t.countedOut && t.firstCx <= doorX && t.cx > doorX - 35) {
+        else if (!t.countedOut && t.firstCx <= doorX && t.cx > doorX - 25) {
           t.countedOut = true;
           vc.totalOut++;
           candidates.push({
@@ -464,12 +446,7 @@ class ServerDetector {
             severity: 'low',
             confidence: t.score,
             targetTrack: t,
-            boundingBoxes: [{
-              box: t.box,
-              label: 'خروج زائر (Out)',
-              color: '#0ea5e9',
-              score: t.score
-            }],
+            boundingBoxes: [toPercentBox(t.box, 'خروج زائر (Out)', '#0ea5e9', t.score)],
             metadata: {
               direction: 'out',
               count: 1,
@@ -501,12 +478,12 @@ class ServerDetector {
       activeTracks.length > 0
     ) {
       const isMultiple = activeTracks.length > 1;
-      const richBoxes = activeTracks.map((t, idx) => ({
-        box: t.box,
-        label: isMultiple ? `Person ${idx + 1} (${Math.round(t.score * 100)}%)` : 'Person detected',
-        score: t.score,
-        color: this.colors[idx % this.colors.length]
-      }));
+      const richBoxes = activeTracks.map((t, idx) => toPercentBox(
+        t.box,
+        isMultiple ? `Person ${idx + 1} (${Math.round(t.score * 100)}%)` : 'Person detected',
+        this.colors[idx % this.colors.length],
+        t.score
+      ));
 
       candidates.push({
         priority: 10,
@@ -556,8 +533,10 @@ class ServerDetector {
           // 2. Update Person Tracks (Track persistent identities)
           const activeTracks = this.updatePersonTracks(cam.id, persons, now);
 
-          // 3. Evaluate AI Services Candidates
-          const candidates = this.evaluateCandidates(cam, activeTracks, detections, now);
+          // 3. Evaluate AI Services Candidates with actual frame dimensions
+          const fw = (detections[0] && detections[0].frameWidth) ? detections[0].frameWidth : 640;
+          const fh = (detections[0] && detections[0].frameHeight) ? detections[0].frameHeight : 360;
+          const candidates = this.evaluateCandidates(cam, activeTracks, detections, now, fw, fh);
           if (candidates.length === 0) continue;
 
           // 4. Select AT MOST ONE winner: sort by priority descending

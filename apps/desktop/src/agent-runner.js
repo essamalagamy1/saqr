@@ -219,12 +219,23 @@ class AgentRunner {
       }
 
       const colors = ['#3b82f6', '#06b6d4', '#10b981', '#a855f7', '#f59e0b', '#ec4899'];
-      const richBoxes = newDetections.map((det, idx) => ({
-        box: det.box,
-        label: newDetections.length === 1 ? `${det.label} detected` : `${det.label} ${idx + 1} (${Math.round(det.score * 100)}%)`,
-        score: det.score,
-        color: colors[idx % colors.length]
-      }));
+      const richBoxes = newDetections.map((det, idx) => {
+        const [x1, y1, x2, y2] = det.box;
+        const fw = det.frameWidth || 640;
+        const fh = det.frameHeight || 360;
+        return {
+          box: det.box,
+          x: det.x ?? parseFloat(((x1 / fw) * 100).toFixed(2)),
+          y: det.y ?? parseFloat(((y1 / fh) * 100).toFixed(2)),
+          width: det.width ?? parseFloat((((x2 - x1) / fw) * 100).toFixed(2)),
+          height: det.height ?? parseFloat((((y2 - y1) / fh) * 100).toFixed(2)),
+          frame_width: fw,
+          frame_height: fh,
+          label: newDetections.length === 1 ? `${det.label} detected` : `${det.label} ${idx + 1} (${Math.round(det.score * 100)}%)`,
+          score: det.score,
+          color: colors[idx % colors.length]
+        };
+      });
 
       const topDet = newDetections[0];
       const isMultiple = newDetections.length > 1;

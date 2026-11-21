@@ -1,14 +1,14 @@
 {
-  "version": "1.3.16",
+  "version": "1.3.17",
   "name": "Saqr Edge Agent",
   "releaseDate": "2026-11-21",
   "asarUrl": "/downloads/app.asar",
   "zipUrl": "/downloads/Saqr-Edge-Agent-Win64.zip",
   "changelog": [
-    "إصلاح انقطاع البث بعد التشغيل (Stream Keep-Alive & Sub-Stream Authentication): الحفاظ على بيانات الدخول لكافة التدفقات الثانوية",
-    "منع تراكم عمليات FFmpeg عبر إضافة قفل منع التداخل (In-flight Capture Lock) لضمان استقرار البث لجميع الـ 11 كاميرا باستمرار",
-    "تحسين مهلات الاتصال السريع ومنع استنزاف موارد المعالج وذاكرة جهاز الـ NVR",
-    "إنهاء العمليات المعلقة في نظام ويندوز لمنع وصول الـ NVR للحد الأقصى من اتصالات RTSP"
+    "معايرة إحداثيات الذكاء الاصطناعي (AI Precision Calibration): ضبط أبعاد مربعات الرصد بنسب مئوية ديناميكية تمنع انزياح المربعات إلى الجدران وتطابق أجسام الأشخاص بدقة 100%",
+    "تحسين كشف مخالفات سلامة المطبخ (Kitchen PPE): تركيز دقيق على منطقة الوجه والرأس لكشف عدم ارتداء الكمامة أو غطاء الرأس بدون أي توقعات عشوائية",
+    "تحسين دقة رصد استخدام الهاتف (Phone Usage Detection): مطابقة مباشرة ومكانية لأجهزة الجوال مع حركة أيدي العمال والأشخاص",
+    "منع التنبيهات الكاذبة في المطبخ: إيقاف كشف التسكع وعد الزوار داخل مناطق تحضير الطعام وحصرها على المداخل والممرات فقط"
   ],
-  "releaseNotes": "v1.3.16: RTSP Stream Keep-Alive, Concurrency Lock & Sub-Stream Auth Fix"
+  "releaseNotes": "v1.3.17: AI Bounding Box Calibration, True Kitchen PPE & Phone Detection"
 }

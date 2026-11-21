@@ -111,13 +111,15 @@ class AIEngine {
       resized.copy(padded, dstOffset, srcOffset, srcOffset + resizedW * 3);
     }
 
-    // Convert HWC -> CHW float32
+    // Convert HWC (RGB from Sharp) -> CHW (BGR for Megvii YOLOX)
+    const bgrOrder = [2, 1, 0];
     const float32Data = new Float32Array(3 * targetH * targetW);
     for (let c = 0; c < 3; c++) {
+      const srcC = bgrOrder[c];
       for (let h = 0; h < targetH; h++) {
         for (let w = 0; w < targetW; w++) {
           float32Data[c * targetH * targetW + h * targetW + w] =
-            padded[(h * targetW + w) * 3 + c];
+            padded[(h * targetW + w) * 3 + srcC];
         }
       }
     }
@@ -147,13 +149,11 @@ class AIEngine {
       const output = results[outputName];
 
       const detections = this._postprocess(output.data, output.dims, ratio, origW, origH);
-      if (detections && detections.length > 0) {
-        return detections;
-      }
-      return await this._fallbackDetect(frameBuffer, cameraId);
+      // When YOLOX model is active, trust its predictions directly (do not hallucinate false motion boxes on wall)
+      return detections || [];
     } catch (err) {
       console.error('[AI] Detection error:', err.message);
-      return await this._fallbackDetect(frameBuffer, cameraId);
+      return [];
     }
   }
 
@@ -224,8 +224,19 @@ class AIEngine {
       const x2 = Math.min(origW, (cx + w / 2) / ratio);
       const y2 = Math.min(origH, (cy + h / 2) / ratio);
 
+      const leftPct = parseFloat(((x1 / origW) * 100).toFixed(2));
+      const topPct = parseFloat(((y1 / origH) * 100).toFixed(2));
+      const widthPct = parseFloat((((x2 - x1) / origW) * 100).toFixed(2));
+      const heightPct = parseFloat((((y2 - y1) / origH) * 100).toFixed(2));
+
       detections.push({
         box: [Math.round(x1), Math.round(y1), Math.round(x2), Math.round(y2)],
+        x: leftPct,
+        y: topPct,
+        width: widthPct,
+        height: heightPct,
+        frameWidth: origW,
+        frameHeight: origH,
         label: this.classes[bestClassId] || `class_${bestClassId}`,
         classId: bestClassId,
         score: parseFloat(finalScore.toFixed(3)),
