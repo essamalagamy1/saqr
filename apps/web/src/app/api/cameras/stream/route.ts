@@ -36,8 +36,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!buffer || buffer.length < 8000) {
-      return NextResponse.json({ success: false, error: 'Empty or incomplete frame (min 8KB required)' }, { status: 400 });
+    if (!buffer || buffer.length < 2000) {
+      return NextResponse.json({ success: false, error: 'Empty or incomplete frame (min 2KB required)' }, { status: 400 });
     }
 
     const frameData = { buffer, updatedAt: Date.now() };

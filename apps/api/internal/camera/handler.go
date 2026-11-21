@@ -121,7 +121,8 @@ func (h *Handler) Create(c *fiber.Ctx) error {
 	}
 
 	// Check for existing camera in this company to prevent duplicates
-	// For NVR/DVR systems, multiple cameras share the same dvr_ip across different channels (CH1..CH8)
+	// For NVR/DVR systems, multiple cameras share the same dvr_ip across different channels (CH1..CH16)
+	// Never match by name alone if dvr_ip or rtsp_url is provided, since NVRs name all channels 'Camera 01' by default
 	var existingID string
 	errCheck := h.db.QueryRow(c.Context(), `
 		SELECT c.id FROM cameras c
@@ -129,7 +130,7 @@ func (h *Handler) Create(c *fiber.Ctx) error {
 		WHERE b.company_id = $1 AND (
 			(c.dvr_ip != '' AND c.dvr_ip = $2 AND c.dvr_channel != '' AND c.dvr_channel = $3) OR
 			($4 != '' AND c.rtsp_url_encrypted = $4) OR
-			(c.name = $5)
+			($2 = '' AND $4 = '' AND c.name = $5)
 		) LIMIT 1
 	`, companyID, req.DvrIP, req.DvrChannel, req.RtspURL, req.Name).Scan(&existingID)
 
@@ -200,4 +201,29 @@ func (h *Handler) Delete(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"success": false, "error": err.Error()})
 	}
 	return c.JSON(fiber.Map{"success": true, "message": "Camera deleted"})
+}
+
+// DeleteAll deletes all cameras for the company or a specific branch
+func (h *Handler) DeleteAll(c *fiber.Ctx) error {
+	companyID := c.Locals("company_id").(string)
+	branchID := c.Query("branch_id")
+
+	query := `
+		DELETE FROM cameras
+		WHERE branch_id IN (
+			SELECT id FROM branches WHERE company_id = $1
+		)
+	`
+	var err error
+	if branchID != "" {
+		query += ` AND branch_id = $2`
+		_, err = h.db.Exec(c.Context(), query, companyID, branchID)
+	} else {
+		_, err = h.db.Exec(c.Context(), query, companyID)
+	}
+
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"success": false, "error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"success": true, "message": "All cameras deleted successfully"})
 }

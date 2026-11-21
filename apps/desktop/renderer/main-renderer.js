@@ -405,8 +405,30 @@ async function testCameraConnection() {
 async function fetchServerCameras(silent = false) {
   try {
     const result = await rased.cameras.fetchFromServer();
-    if (result.success && result.data && result.data.length > 0) {
+    if (result.success && Array.isArray(result.data)) {
+      if (result.data.length === 0) {
+        // Cloud platform has 0 cameras: synchronize local store so deleted cameras do not resurrect
+        const existing = await rased.cameras.list();
+        if (existing.length > 0) {
+          for (const c of existing) {
+            await rased.cameras.remove(c.id);
+          }
+          loadCameras();
+        }
+        if (!silent) alert('تمت المزامنة مع المنصة: لا توجد كاميرات مسجلة.');
+        return;
+      }
+
       const existing = await rased.cameras.list();
+      const serverIds = new Set(result.data.map(c => c.id));
+
+      // Prune local cameras that were deleted on the cloud platform
+      for (const c of existing) {
+        if (c.id && c.id.length > 20 && !serverIds.has(c.id)) {
+          await rased.cameras.remove(c.id);
+        }
+      }
+
       let newCount = 0;
       let updatedCount = 0;
 
@@ -900,36 +922,44 @@ let fetchedDvrChannels = [];
 
 async function showDvrModal() {
   const modal = document.getElementById('dvrConnectModal');
-  modal.style.display = 'flex';
-  document.getElementById('dvrChannelsResultBox').style.display = 'none';
-  document.getElementById('btnImportDvrChannels').style.display = 'none';
+  if (modal) modal.style.display = 'flex';
+  const resBox = document.getElementById('dvrChannelsResultBox');
+  if (resBox) resBox.style.display = 'none';
+  const btnImp = document.getElementById('btnImportDvrChannels');
+  if (btnImp) {
+    btnImp.style.display = 'none';
+    btnImp.innerHTML = '<span>✅ استيراد وتفعيل الكاميرات المختارة (<span id="dvrSelectedCountText">0</span>)</span>';
+  }
 
   // Populate branches select
   const branchSelect = document.getElementById('dvrBranchSelect');
-  branchSelect.innerHTML = '<option value="">جاري تحميل الفروع...</option>';
-  try {
-    const res = await rased.branches.list();
-    if (res && res.success && res.data && res.data.length > 0) {
-      branchSelect.innerHTML = res.data.map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('');
-    } else {
+  if (branchSelect) {
+    branchSelect.innerHTML = '<option value="">جاري تحميل الفروع...</option>';
+    try {
+      const res = await rased.branches.list();
+      if (res && res.success && res.data && res.data.length > 0) {
+        branchSelect.innerHTML = res.data.map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('');
+      } else {
+        branchSelect.innerHTML = '<option value="default">الفرع الرئيسي</option>';
+      }
+    } catch {
       branchSelect.innerHTML = '<option value="default">الفرع الرئيسي</option>';
     }
-  } catch {
-    branchSelect.innerHTML = '<option value="default">الفرع الرئيسي</option>';
   }
 }
 
 function closeDvrModal() {
-  document.getElementById('dvrConnectModal').style.display = 'none';
+  const modal = document.getElementById('dvrConnectModal');
+  if (modal) modal.style.display = 'none';
 }
 
 async function connectAndFetchDvrChannels() {
-  const ip = document.getElementById('dvrIpInput').value.trim();
-  const brand = document.getElementById('dvrBrandSelect').value;
-  const username = document.getElementById('dvrUsernameInput').value.trim() || 'admin';
-  const password = document.getElementById('dvrPasswordInput').value;
-  const httpPort = parseInt(document.getElementById('dvrHttpPortInput').value, 10) || 80;
-  const rtspPort = parseInt(document.getElementById('dvrRtspPortInput').value, 10) || 554;
+  const ip = document.getElementById('dvrIpInput') ? document.getElementById('dvrIpInput').value.trim() : '';
+  const brand = document.getElementById('dvrBrandSelect') ? document.getElementById('dvrBrandSelect').value : 'auto';
+  const username = document.getElementById('dvrUsernameInput') ? document.getElementById('dvrUsernameInput').value.trim() || 'admin' : 'admin';
+  const password = document.getElementById('dvrPasswordInput') ? document.getElementById('dvrPasswordInput').value : '';
+  const httpPort = document.getElementById('dvrHttpPortInput') ? parseInt(document.getElementById('dvrHttpPortInput').value, 10) || 80 : 80;
+  const rtspPort = document.getElementById('dvrRtspPortInput') ? parseInt(document.getElementById('dvrRtspPortInput').value, 10) || 554 : 554;
 
   if (!ip) {
     alert('يرجى إدخال عنوان IP الخاص بجهاز الـ DVR');
@@ -940,9 +970,9 @@ async function connectAndFetchDvrChannels() {
   const btnText = document.getElementById('dvrFetchBtnText');
   const btn = document.getElementById('btnConnectDvr');
 
-  spinner.style.display = 'inline-block';
-  btnText.textContent = 'جاري الاتصال بالـ DVR وسحب القنوات...';
-  btn.disabled = true;
+  if (spinner) spinner.style.display = 'inline-block';
+  if (btnText) btnText.textContent = 'جاري الاتصال بالـ DVR وسحب القنوات...';
+  if (btn) btn.disabled = true;
 
   try {
     const res = await rased.dvr.connectAndFetch({
@@ -964,9 +994,9 @@ async function connectAndFetchDvrChannels() {
   } catch (err) {
     alert('فشل في الاتصال بالـ DVR: ' + (err.message || 'خطأ غير معروف'));
   } finally {
-    spinner.style.display = 'none';
-    btnText.textContent = '🔍 فحص واستخراج قنوات الكاميرات (Fetch Channels)';
-    btn.disabled = false;
+    if (spinner) spinner.style.display = 'none';
+    if (btnText) btnText.textContent = '🔍 فحص واستخراج قنوات الكاميرات (Fetch Channels)';
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -977,34 +1007,46 @@ function renderDvrChannels(res) {
   const modelText = document.getElementById('dvrDeviceModel');
   const btnImport = document.getElementById('btnImportDvrChannels');
 
-  resultBox.style.display = 'block';
-  btnImport.style.display = 'inline-flex';
+  if (resultBox) resultBox.style.display = 'block';
+  if (btnImport) {
+    btnImport.style.display = 'inline-flex';
+    btnImport.disabled = false;
+  }
 
-  badge.textContent = `${res.channels.length} قناة مستخرجة`;
-  modelText.textContent = `${res.device.model || 'DVR'} (${res.brand})`;
+  const channelCount = (res && res.channels && Array.isArray(res.channels)) ? res.channels.length : 0;
+  if (badge) {
+    badge.textContent = `${channelCount} قناة مستخرجة`;
+  }
+  if (modelText) {
+    const devModel = (res && res.device && res.device.model) ? res.device.model : 'DVR / NVR';
+    const brand = (res && res.brand) ? res.brand : 'Hikvision';
+    modelText.textContent = `${devModel} (${brand})`;
+  }
 
-  list.innerHTML = res.channels.map((ch, idx) => `
-    <div style="display: flex; align-items: center; justify-content: space-between; background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 10px 12px;">
-      <div style="display: flex; align-items: center; gap: 10px;">
-        <input type="checkbox" class="dvr-channel-checkbox" id="dvr-ch-check-${idx}" data-idx="${idx}" checked onchange="updateDvrSelectedCount()">
-        <div style="width: 28px; height: 28px; border-radius: 6px; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.25); display: flex; align-items: center; justify-content: center; color: #38bdf8; font-weight: 700; font-size: 11px;">
-          ${ch.channelNumber}
+  if (list && res && Array.isArray(res.channels)) {
+    list.innerHTML = res.channels.map((ch, idx) => `
+      <div style="display: flex; align-items: center; justify-content: space-between; background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 10px 12px;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <input type="checkbox" class="dvr-channel-checkbox" id="dvr-ch-check-${idx}" data-idx="${idx}" checked onchange="updateDvrSelectedCount()">
+          <div style="width: 28px; height: 28px; border-radius: 6px; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.25); display: flex; align-items: center; justify-content: center; color: #38bdf8; font-weight: 700; font-size: 11px;">
+            ${ch.channelNumber || idx + 1}
+          </div>
+          <div>
+            <div style="font-weight: 700; font-size: 12px; color: #fff;">${escapeHtml(ch.name || `كاميرا ${ch.channelNumber || idx + 1}`)}</div>
+            <div style="font-size: 10px; font-family: monospace; color: #64748b;" dir="ltr">${escapeHtml(ch.mainRtspUrl || '')}</div>
+          </div>
         </div>
-        <div>
-          <div style="font-weight: 700; font-size: 12px; color: #fff;">${escapeHtml(ch.name)}</div>
-          <div style="font-size: 10px; font-family: monospace; color: #64748b;" dir="ltr">${escapeHtml(ch.mainRtspUrl)}</div>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 10px; background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); padding: 1px 6px; border-radius: 12px; font-weight: 600;">
+            ${escapeHtml(ch.resolution || '1080p')}
+          </span>
+          <span style="font-size: 10px; background: rgba(56, 189, 248, 0.1); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.2); padding: 1px 6px; border-radius: 12px;">
+            Dual Stream
+          </span>
         </div>
       </div>
-      <div style="display: flex; align-items: center; gap: 6px;">
-        <span style="font-size: 10px; background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); padding: 1px 6px; border-radius: 12px; font-weight: 600;">
-          ${escapeHtml(ch.resolution || '1080p')}
-        </span>
-        <span style="font-size: 10px; background: rgba(56, 189, 248, 0.1); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.2); padding: 1px 6px; border-radius: 12px;">
-          Dual Stream
-        </span>
-      </div>
-    </div>
-  `).join('');
+    `).join('');
+  }
 
   updateDvrSelectedCount();
 }
@@ -1018,7 +1060,15 @@ function toggleSelectAllDvrChannels(checked) {
 
 function updateDvrSelectedCount() {
   const selected = document.querySelectorAll('.dvr-channel-checkbox:checked').length;
-  document.getElementById('dvrSelectedCountText').textContent = selected;
+  const countEl = document.getElementById('dvrSelectedCountText');
+  if (countEl) {
+    countEl.textContent = selected;
+  }
+  const btnImport = document.getElementById('btnImportDvrChannels');
+  if (btnImport) {
+    btnImport.disabled = (selected === 0);
+    btnImport.innerHTML = `<span>✅ استيراد وتفعيل الكاميرات المختارة (<span id="dvrSelectedCountText">${selected}</span>)</span>`;
+  }
 }
 
 async function importSelectedDvrChannels() {
@@ -1029,12 +1079,14 @@ async function importSelectedDvrChannels() {
   }
 
   const branchSelect = document.getElementById('dvrBranchSelect');
-  const branchId = branchSelect.value;
-  const branchName = branchSelect.options[branchSelect.selectedIndex]?.text || 'الفرع الرئيسي';
+  const branchId = branchSelect ? branchSelect.value : '';
+  const branchName = branchSelect && branchSelect.selectedIndex >= 0 ? branchSelect.options[branchSelect.selectedIndex]?.text : 'الفرع الرئيسي';
 
   const btnImport = document.getElementById('btnImportDvrChannels');
-  btnImport.disabled = true;
-  btnImport.textContent = `جاري استيراد وتفعيل ${checkboxes.length} كاميرا...`;
+  if (btnImport) {
+    btnImport.disabled = true;
+    btnImport.innerHTML = `<span>⏳ جاري استيراد وتفعيل ${checkboxes.length} كاميرا...</span>`;
+  }
 
   let added = 0;
   for (const cb of checkboxes) {
@@ -1059,6 +1111,15 @@ async function importSelectedDvrChannels() {
   closeDvrModal();
   loadCameras();
   rased.cameras.syncAllToCloud().catch(() => {});
+
+  // Auto-start or reload capture agent immediately
+  if (!agentRunning) {
+    await rased.agent.start().catch(() => {});
+    setAgentUI(true);
+  } else {
+    rased.agent.reloadCameras().catch(() => {});
+  }
+
   alert(`✅ تم استيراد وتفعيل ${added} كاميرا من جهاز الـ DVR بنجاح ومزامنتها مع منصة صقر! الكاميرات الآن تعمل وتستقبل التحليل الذكي.`);
 }
 
@@ -1209,6 +1270,13 @@ async function init() {
 
   const status = await rased.agent.status();
   setAgentUI(status.running);
+
+  // Auto-start agent if there are configured cameras
+  if (!status.running && cameras.filter(c => c.enabled !== false).length > 0) {
+    console.log('[INIT] Auto-starting Saqr Edge Agent because cameras are present...');
+    await rased.agent.start().catch(() => {});
+    setAgentUI(true);
+  }
 
   try {
     const appVersion = await rased.updater.getVersion();

@@ -172,7 +172,10 @@ class DvrConnector {
         const idMatch = chXml.match(/<id>(\d+)<\/id>/i);
         const nameMatch = chXml.match(/<name>([^<]+)<\/name>/i);
         const chNum = idMatch ? parseInt(idMatch[1], 10) : i + 1;
-        const chName = nameMatch && nameMatch[1].trim() ? nameMatch[1].trim() : `كاميرا ${chNum} (قناة CH${chNum})`;
+        const rawName = nameMatch && nameMatch[1].trim() ? nameMatch[1].trim() : '';
+        const chName = (!rawName || rawName === 'Camera 01' || rawName.toLowerCase() === 'camera')
+          ? `كاميرا ${chNum} (قناة CH${chNum})`
+          : `كاميرا ${chNum} (${rawName})`;
 
         channels.push({
           channelNumber: chNum,
@@ -204,7 +207,10 @@ class DvrConnector {
         // Skip if already captured
         if (channels.some(c => c.channelNumber === chNum)) continue;
 
-        const chName = nameMatch && nameMatch[1].trim() ? nameMatch[1].trim() : `كاميرا IP ${chNum} (CH${chNum})`;
+        const rawName = nameMatch && nameMatch[1].trim() ? nameMatch[1].trim() : '';
+        const chName = (!rawName || rawName === 'Camera 01' || rawName.toLowerCase() === 'camera')
+          ? `كاميرا ${chNum} (D${chNum})`
+          : `كاميرا ${chNum} (${rawName})`;
 
         channels.push({
           channelNumber: chNum,
@@ -220,6 +226,51 @@ class DvrConnector {
         });
       }
     }
+
+    // 4. Fetch Streaming Channels (/ISAPI/Streaming/channels) as additional discovery source
+    try {
+      const streamRes = await this.httpGet(ip, port, '/ISAPI/Streaming/channels', username, password);
+      if (streamRes.body && streamRes.body.includes('StreamingChannel')) {
+        const regex = /<StreamingChannel[\s\S]*?<\/StreamingChannel>/gi;
+        const matches = streamRes.body.match(regex) || [];
+
+        for (const chXml of matches) {
+          const idMatch = chXml.match(/<id>(\d+)<\/id>/i);
+          const nameMatch = chXml.match(/<channelName>([^<]+)<\/channelName>/i) || chXml.match(/<name>([^<]+)<\/name>/i);
+          if (!idMatch) continue;
+
+          const rawId = parseInt(idMatch[1], 10);
+          // Only process main streams (e.g. 101, 201, ..., 1101, or 1..16)
+          if (rawId > 100 && rawId % 100 !== 1) continue; // skip sub-streams (102, 202, etc.)
+
+          const chNum = rawId >= 100 ? Math.floor(rawId / 100) : rawId;
+          if (channels.some(c => c.channelNumber === chNum)) continue;
+
+          const rawName = nameMatch && nameMatch[1].trim() ? nameMatch[1].trim() : '';
+          const chName = (!rawName || rawName === 'Camera 01' || rawName.toLowerCase() === 'camera')
+            ? `كاميرا ${chNum} (قناة CH${chNum})`
+            : `كاميرا ${chNum} (${rawName})`;
+
+          channels.push({
+            channelNumber: chNum,
+            name: chName,
+            status: 'online',
+            resolution: '1080p',
+            type: 'Streaming Channel',
+            mainRtspUrl: `rtsp://${username}:${password}@${ip}:${rtspPort}/Streaming/Channels/${chNum}01`,
+            subRtspUrl: `rtsp://${username}:${password}@${ip}:${rtspPort}/Streaming/Channels/${chNum}02`,
+            dvrIp: ip,
+            dvrChannel: `CH${chNum}`,
+            brand: 'Hikvision'
+          });
+        }
+      }
+    } catch {
+      // Ignore streaming channels query error and proceed with discovered channels
+    }
+
+    // Sort channels by channelNumber ascending
+    channels.sort((a, b) => a.channelNumber - b.channelNumber);
 
     return {
       success: true,

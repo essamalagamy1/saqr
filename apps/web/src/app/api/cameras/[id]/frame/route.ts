@@ -30,8 +30,9 @@ export async function GET(
     frameData = cache.get(ip);
   }
 
-  // 1. If we have a live frame from Edge Agent
-  if (frameData && frameData.buffer && frameData.buffer.length > 8000) {
+  // 1. If we have a fresh live frame from Edge Agent (within last 120 seconds)
+  const isFresh = frameData && (Date.now() - (frameData.updatedAt || 0) < 120000);
+  if (frameData && isFresh && frameData.buffer && frameData.buffer.length > 2000) {
     return new NextResponse(new Uint8Array(frameData.buffer), {
       status: 200,
       headers: {

@@ -137,7 +137,7 @@ export async function POST(req: NextRequest) {
           if (m) deviceModel = m[1].trim();
         }
 
-        // Analog video inputs
+        // Analog video inputs (DVRs)
         const anaRes = await httpGet(ip, httpPort, '/ISAPI/System/Video/inputs/channels', username, password);
         if (anaRes.body && anaRes.body.includes('VideoInputChannel')) {
           const matches = anaRes.body.match(/<VideoInputChannel[\s\S]*?<\/VideoInputChannel>/gi) || [];
@@ -146,7 +146,70 @@ export async function POST(req: NextRequest) {
             const idM = xml.match(/<id>(\d+)<\/id>/i);
             const nameM = xml.match(/<name>([^<]+)<\/name>/i);
             const chNum = idM ? parseInt(idM[1], 10) : i + 1;
-            const chName = nameM && nameM[1].trim() ? nameM[1].trim() : `كاميرا ${chNum} (CH${chNum})`;
+            const rawName = nameM && nameM[1].trim() ? nameM[1].trim() : '';
+            const chName = (!rawName || rawName === 'Camera 01' || rawName.toLowerCase() === 'camera')
+              ? `كاميرا ${chNum} (قناة CH${chNum})`
+              : `كاميرا ${chNum} (${rawName})`;
+            channels.push({
+              channelNumber: chNum,
+              name: chName,
+              status: 'online',
+              resolution: '1080p',
+              mainRtspUrl: `rtsp://${username}:${password}@${ip}:${rtspPort}/Streaming/Channels/${chNum}01`,
+              subRtspUrl: `rtsp://${username}:${password}@${ip}:${rtspPort}/Streaming/Channels/${chNum}02`,
+              dvrIp: ip,
+              dvrChannel: `CH${chNum}`,
+              brand: 'Hikvision'
+            });
+          }
+        }
+
+        // Digital IP channels (NVRs / Hybrid DVRs like DS-7216 / iDS)
+        const digitalRes = await httpGet(ip, httpPort, '/ISAPI/ContentMgmt/InputProxy/channels', username, password);
+        if (digitalRes.body && digitalRes.body.includes('InputProxyChannel')) {
+          const matches = digitalRes.body.match(/<InputProxyChannel[\s\S]*?<\/InputProxyChannel>/gi) || [];
+          for (let i = 0; i < matches.length; i++) {
+            const xml = matches[i];
+            const idM = xml.match(/<id>(\d+)<\/id>/i);
+            const nameM = xml.match(/<name>([^<]+)<\/name>/i);
+            const chNum = idM ? parseInt(idM[1], 10) : i + 1;
+            if (channels.some(c => c.channelNumber === chNum)) continue;
+
+            const rawName = nameM && nameM[1].trim() ? nameM[1].trim() : '';
+            const chName = (!rawName || rawName === 'Camera 01' || rawName.toLowerCase() === 'camera')
+              ? `كاميرا ${chNum} (D${chNum})`
+              : `كاميرا ${chNum} (${rawName})`;
+            channels.push({
+              channelNumber: chNum,
+              name: chName,
+              status: 'online',
+              resolution: '1080p',
+              mainRtspUrl: `rtsp://${username}:${password}@${ip}:${rtspPort}/Streaming/Channels/${chNum}01`,
+              subRtspUrl: `rtsp://${username}:${password}@${ip}:${rtspPort}/Streaming/Channels/${chNum}02`,
+              dvrIp: ip,
+              dvrChannel: `CH${chNum}`,
+              brand: 'Hikvision'
+            });
+          }
+        }
+
+        // Streaming channels (/ISAPI/Streaming/channels)
+        const streamRes = await httpGet(ip, httpPort, '/ISAPI/Streaming/channels', username, password);
+        if (streamRes.body && streamRes.body.includes('StreamingChannel')) {
+          const sMatches = streamRes.body.match(/<StreamingChannel[\s\S]*?<\/StreamingChannel>/gi) || [];
+          for (const sXml of sMatches) {
+            const idM = sXml.match(/<id>(\d+)<\/id>/i);
+            const nameM = sXml.match(/<channelName>([^<]+)<\/channelName>/i) || sXml.match(/<name>([^<]+)<\/name>/i);
+            if (!idM) continue;
+            const rawId = parseInt(idM[1], 10);
+            if (rawId > 100 && rawId % 100 !== 1) continue;
+            const chNum = rawId >= 100 ? Math.floor(rawId / 100) : rawId;
+            if (channels.some(c => c.channelNumber === chNum)) continue;
+
+            const rawName = nameM && nameM[1].trim() ? nameM[1].trim() : '';
+            const chName = (!rawName || rawName === 'Camera 01' || rawName.toLowerCase() === 'camera')
+              ? `كاميرا ${chNum} (قناة CH${chNum})`
+              : `كاميرا ${chNum} (${rawName})`;
             channels.push({
               channelNumber: chNum,
               name: chName,

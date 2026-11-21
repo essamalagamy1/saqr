@@ -179,7 +179,7 @@ class AgentRunner {
           const m = camera.rtspUrl.match(/@?([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})/);
           if (m) ip = m[1];
         }
-        let ch = camera.channel ? `CH${camera.channel}` : (camera.dvrChannel || '');
+        let ch = camera.dvrChannel ? camera.dvrChannel.toUpperCase().trim() : (camera.channel ? `CH${camera.channel}` : '');
         if (!ch && camera.rtspUrl) {
           const chMatch = camera.rtspUrl.match(/\/Streaming\/Channels\/(\d{1,2})(?:01|02|03)/i) ||
                           camera.rtspUrl.match(/\/cam\/realmonitor\?channel=(\d+)/i) ||

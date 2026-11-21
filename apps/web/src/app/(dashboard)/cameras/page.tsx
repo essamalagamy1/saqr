@@ -373,13 +373,65 @@ export default function CamerasPage() {
   };
 
   const handleDeleteCamera = async (id: string, name: string) => {
-    if (!confirm(`هل أنت متأكد من حذف الكاميرا "${name}" نهائياً؟`)) return;
+    if (!confirm(`هل أنت متأكد من حذف الكاميرا "${name}" نهائياً؟ لن تعود للظهور مرة أخرى.`)) return;
 
     try {
+      // 1. Delete from Cloud Database
       await api.delete(`/cameras/${id}`);
       setCameras((prev) => prev.filter((c) => c.id !== id));
+
+      // 2. Notify local Edge Agent on port 18800 so it drops it from electron-store
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 1200);
+        await fetch(`http://127.0.0.1:18800/api/cameras/${id}`, {
+          method: 'DELETE',
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+      } catch {}
+
+      // 3. Clear memory frame cache
+      await fetch('/api/cameras/stream', { method: 'DELETE' }).catch(() => {});
     } catch (err: any) {
       alert(err.message || 'تعذر حذف الكاميرا');
+    }
+  };
+
+  const handleDeleteAllCameras = async () => {
+    if (cameras.length === 0) {
+      alert('لا توجد كاميرات لحذفها.');
+      return;
+    }
+    if (!confirm(`⚠️ تحذير: هل أنت متأكد من حذف جميع الكاميرات (${cameras.length} كاميرا) نهائياً من المنصة وتطبيق المراقبة؟\nسيتم حذفها نهائياً ولن تعود للظهور مجدداً.`)) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // 1. Bulk delete all cameras on Cloud API
+      await api.delete('/cameras/bulk/all');
+
+      // 2. Wipe cameras from local Edge Agent store if running
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 1500);
+        await fetch('http://127.0.0.1:18800/api/cameras', {
+          method: 'DELETE',
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+      } catch {}
+
+      // 3. Clear memory frame cache
+      await fetch('/api/cameras/stream', { method: 'DELETE' }).catch(() => {});
+
+      setCameras([]);
+      alert('✅ تم حذف جميع الكاميرات بنجاح وتصفير القنوات.');
+    } catch (err: any) {
+      alert('حدث خطأ أثناء حذف الكاميرات: ' + (err.message || ''));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -451,6 +503,16 @@ export default function CamerasPage() {
             <Plus className="h-4 w-4" />
             <span>إضافة يدوية</span>
           </button>
+          {cameras.length > 0 && (
+            <button
+              onClick={handleDeleteAllCameras}
+              title="حذف جميع الكاميرات دفعة واحدة"
+              className="flex items-center gap-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 px-3.5 py-2 text-xs font-bold transition shadow-sm"
+            >
+              <Trash2 className="h-4 w-4" />
+              <span>حذف الكل ({cameras.length})</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -553,9 +615,11 @@ export default function CamerasPage() {
                         <Video className={`h-4 w-4 ${isActive ? 'text-amber-500' : 'text-slate-600'}`} />
                         <span>{cam.name}</span>
                       </td>
-                      <td className="px-5 py-3.5">{cam.branch_name || 'فرع القاهرة الجديدة'}</td>
+                      <td className="px-5 py-3.5">
+                        {cam.branch_name || branches.find((b) => b.id === cam.branch_id)?.name || branches[0]?.name || 'الفرع الرئيسي'}
+                      </td>
                       <td className="px-5 py-3.5 font-mono text-slate-400">
-                        {cam.dvr_ip || '192.168.8.234'} • {cam.dvr_channel || 'CH1'}
+                        {(cam.dvr_ip || (cam.rtsp_url ? (cam.rtsp_url.match(/@?([0-9.]+)/)?.[1] || '') : '')) || '192.168.8.234'} • {cam.dvr_channel || 'CH1'}
                       </td>
                       <td className="px-5 py-3.5 font-mono uppercase">{cam.protocol || 'RTSP'}</td>
                       <td className="px-5 py-3.5">

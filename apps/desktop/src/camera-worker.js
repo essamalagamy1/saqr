@@ -258,9 +258,9 @@ class CameraWorker {
     const baseOrigin = match ? match[1] : rtspUrl;
     const currentPath = match && match[2] ? match[2] : '/Streaming/Channels/101';
 
-    // Parse channel number from current path if present
+    // Parse channel number from current path if present (supports up to 4 digits like 1601 -> ch 16)
     let ch = 1;
-    const chMatch = currentPath.match(/(?:Channels\/|ch|\/|channel=)([0-9]{1,3})/i);
+    const chMatch = currentPath.match(/(?:Channels\/|ch|\/|channel=)([0-9]{1,4})/i);
     if (chMatch) {
       const parsed = parseInt(chMatch[1], 10);
       if (parsed >= 100) {
@@ -273,16 +273,17 @@ class CameraWorker {
     const testPaths = [
       currentPath,
       `/Streaming/Channels/${ch}01`,
-      `/ch${ch}/main`,
       `/Streaming/Channels/${ch}02`,
+      `/ch${ch}/main`,
       `/h264/ch${ch}/main/av_stream`,
       `/cam/realmonitor?channel=${ch}&subtype=0`,
       `/live/ch${ch}`,
-      '/Streaming/Channels/101',
-      '/ch1/main',
-      '/Streaming/Channels/1',
-      '/H.264'
     ];
+
+    // Only test generic/root fallback paths if testing Channel 1 to prevent cross-channel stream leakage
+    if (ch === 1) {
+      testPaths.push('/Streaming/Channels/101', '/ch1/main', '/Streaming/Channels/1', '/H.264');
+    }
     const uniquePaths = [...new Set(testPaths)];
 
     let lastErr = null;

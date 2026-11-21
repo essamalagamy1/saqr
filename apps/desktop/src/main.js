@@ -494,10 +494,36 @@ ipcMain.handle('cameras:syncAllToCloud', async () => {
 
   const ApiClient = require('./api-client');
   const client = new ApiClient(serverUrl, token);
-  const localCameras = store.get('cameras', []);
+  let localCameras = store.get('cameras', []);
 
   if (localCameras.length === 0) {
     return { success: true, count: 0, message: 'لا توجد كاميرات محلية للمزامنة' };
+  }
+
+  // Check server state first: if cameras were deleted from server, do not resurrect them!
+  try {
+    const serverCams = await client.getCameras();
+    if (Array.isArray(serverCams)) {
+      if (serverCams.length === 0 && localCameras.some(c => c.id && c.id.length > 20)) {
+        // All cameras were deleted on cloud platform
+        console.log('[SYNC] Server cameras were cleared. Synchronizing local store to match server...');
+        store.set('cameras', []);
+        reloadAgentIfRunning();
+        return { success: true, count: 0, message: 'تمت مزامنة الحذف مع المنصة' };
+      }
+
+      if (serverCams.length > 0) {
+        const serverIdSet = new Set(serverCams.map(s => s.id));
+        // Prune cameras that have a server ID that no longer exists on server (were deleted)
+        const kept = localCameras.filter(c => !c.id || c.id.length < 20 || serverIdSet.has(c.id));
+        if (kept.length !== localCameras.length) {
+          localCameras = kept;
+          store.set('cameras', localCameras);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[SYNC] Could not check server cameras state:', err.message);
   }
 
   let syncedCount = 0;
@@ -523,7 +549,7 @@ try {
   const http = require('http');
   const localServer = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     if (req.method === 'OPTIONS') {
@@ -535,6 +561,25 @@ try {
       const cams = store.get('cameras', []);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ success: true, cameras: cams }));
+    }
+
+    // Delete single camera by ID or channel
+    if (req.url.startsWith('/api/cameras/') && req.method === 'DELETE') {
+      const targetId = decodeURIComponent(req.url.replace(/^\/api\/cameras\//, '').split('?')[0]);
+      const currentCams = store.get('cameras', []);
+      const filtered = currentCams.filter(c => c.id !== targetId && c.dvrChannel !== targetId && c.name !== targetId);
+      store.set('cameras', filtered);
+      reloadAgentIfRunning();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: true, message: 'Camera deleted from agent', remaining: filtered.length }));
+    }
+
+    // Delete all cameras from local agent
+    if (req.url === '/api/cameras' && req.method === 'DELETE') {
+      store.set('cameras', []);
+      reloadAgentIfRunning();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: true, message: 'All local cameras deleted from agent' }));
     }
 
     if (req.url.startsWith('/api/cameras/snapshot') && req.method === 'GET') {
