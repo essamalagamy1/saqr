@@ -111,7 +111,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const {
-      ip = '192.168.8.234',
+      ip = '192.168.8.57',
       httpPort = 80,
       rtspPort = 554,
       username = 'admin',
@@ -172,6 +172,14 @@ export async function POST(req: NextRequest) {
             const xml = matches[i];
             const idM = xml.match(/<id>(\d+)<\/id>/i);
             const nameM = xml.match(/<name>([^<]+)<\/name>/i);
+            const ipM = xml.match(/<ipAddress>([^<]+)<\/ipAddress>/i);
+            const proxyIp = ipM ? ipM[1].trim() : '';
+
+            // Skip unassigned slots (no IP address or 0.0.0.0) in 16/32 channel NVRs
+            if (!proxyIp || proxyIp === '0.0.0.0' || proxyIp === '::') {
+              continue;
+            }
+
             const chNum = idM ? parseInt(idM[1], 10) : i + 1;
             if (channels.some(c => c.channelNumber === chNum)) continue;
 
@@ -200,6 +208,8 @@ export async function POST(req: NextRequest) {
           for (const sXml of sMatches) {
             const idM = sXml.match(/<id>(\d+)<\/id>/i);
             const nameM = sXml.match(/<channelName>([^<]+)<\/channelName>/i) || sXml.match(/<name>([^<]+)<\/name>/i);
+            const enabledM = sXml.match(/<enabled>([^<]+)<\/enabled>/i);
+            if (enabledM && enabledM[1].trim().toLowerCase() === 'false') continue;
             if (!idM) continue;
             const rawId = parseInt(idM[1], 10);
             if (rawId > 100 && rawId % 100 !== 1) continue;
@@ -256,21 +266,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3. Fallback Generation if DVR is on a private subnet isolated from web server
     if (channels.length === 0) {
-      for (let i = 1; i <= (maxChannels || 16); i++) {
-        channels.push({
-          channelNumber: i,
-          name: `كاميرا ${i} (قناة CH${i})`,
-          status: 'online',
-          resolution: '1080p',
-          mainRtspUrl: `rtsp://${username}:${password}@${ip}:${rtspPort}/Streaming/Channels/${i}01`,
-          subRtspUrl: `rtsp://${username}:${password}@${ip}:${rtspPort}/Streaming/Channels/${i}02`,
-          dvrIp: ip,
-          dvrChannel: `CH${i}`,
-          brand: 'Hikvision / Generic'
-        });
-      }
+      return NextResponse.json({
+        success: false,
+        error: `تعذر العثور على أي قنوات كاميرات نشطة على جهاز الـ NVR عند العنوان (${ip}). تأكد من أن جهاز الـ NVR متصل ويعمل وتأكد من صحة الـ IP وكلمة المرور.`
+      }, { status: 404 });
     }
 
     return NextResponse.json({

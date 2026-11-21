@@ -13,14 +13,19 @@ class DvrConnector {
    * Helper: Generate Digest Authorization Header for Hikvision / Dahua / ONVIF
    */
   generateDigestAuth(method, uri, authHeader, username, password) {
-    if (!authHeader || !authHeader.startsWith('Digest ')) return null;
+    if (Array.isArray(authHeader)) {
+      authHeader = authHeader.find(h => typeof h === 'string' && h.toLowerCase().startsWith('digest')) || authHeader[0] || '';
+    }
+    if (!authHeader || typeof authHeader !== 'string' || !authHeader.toLowerCase().startsWith('digest')) return null;
 
     const parseParams = (header) => {
       const params = {};
-      const matches = header.replace(/^Digest\s+/, '').match(/(\w+)="?([^",]+)"?/g) || [];
+      const matches = header.replace(/^Digest\s+/i, '').match(/(\w+)="?([^",]+)"?/g) || [];
       for (const m of matches) {
         const [k, v] = m.split('=');
-        params[k.trim()] = v.replace(/"/g, '').trim();
+        if (k && v !== undefined) {
+          params[k.trim()] = v.replace(/"/g, '').trim();
+        }
       }
       return params;
     };
@@ -202,6 +207,14 @@ class DvrConnector {
         const chXml = matches[i];
         const idMatch = chXml.match(/<id>(\d+)<\/id>/i);
         const nameMatch = chXml.match(/<name>([^<]+)<\/name>/i);
+        const ipMatch = chXml.match(/<ipAddress>([^<]+)<\/ipAddress>/i);
+        const proxyIp = ipMatch ? ipMatch[1].trim() : '';
+
+        // Skip unassigned slots (no IP address or 0.0.0.0) in 16/32 channel NVRs
+        if (!proxyIp || proxyIp === '0.0.0.0' || proxyIp === '::') {
+          continue;
+        }
+
         const chNum = idMatch ? parseInt(idMatch[1], 10) : i + 1;
         
         // Skip if already captured
@@ -237,6 +250,8 @@ class DvrConnector {
         for (const chXml of matches) {
           const idMatch = chXml.match(/<id>(\d+)<\/id>/i);
           const nameMatch = chXml.match(/<channelName>([^<]+)<\/channelName>/i) || chXml.match(/<name>([^<]+)<\/name>/i);
+          const enabledMatch = chXml.match(/<enabled>([^<]+)<\/enabled>/i);
+          if (enabledMatch && enabledMatch[1].trim().toLowerCase() === 'false') continue;
           if (!idMatch) continue;
 
           const rawId = parseInt(idMatch[1], 10);
@@ -456,30 +471,8 @@ class DvrConnector {
       return fallbackResult;
     }
 
-    // 4. Default Generator: If offline during setup, generate all 16 channels so the user can import them
-    console.log('[DVR-CONNECTOR] Generating standard 16-channel profile for setup...');
-    const generatedChannels = [];
-    for (let i = 1; i <= (maxChannels || 16); i++) {
-      generatedChannels.push({
-        channelNumber: i,
-        name: `كاميرا ${i} (قناة CH${i})`,
-        status: 'online',
-        resolution: '1080p',
-        type: 'DVR Channel',
-        mainRtspUrl: `rtsp://${username}:${password}@${ip}:${rtspPort}/Streaming/Channels/${i}01`,
-        subRtspUrl: `rtsp://${username}:${password}@${ip}:${rtspPort}/Streaming/Channels/${i}02`,
-        dvrIp: ip,
-        dvrChannel: `CH${i}`,
-        brand: 'Hikvision / Generic'
-      });
-    }
-
-    return {
-      success: true,
-      brand: 'Standard DVR (Generated)',
-      device: { model: 'DVR 16-Channel System', ip, totalChannels: 16 },
-      channels: generatedChannels
-    };
+    // 4. If no channels were detected
+    throw new Error(`لم يتم العثور على أي قنوات كاميرات نشطة على جهاز الـ NVR عند العنوان (${ip}). يرجى التأكد من تشغيل الجهاز، صحة عنوان الـ IP وكلمة المرور، وتوصيل الكاميرات بالـ NVR.`);
   }
 }
 

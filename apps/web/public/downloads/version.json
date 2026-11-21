@@ -1,14 +1,14 @@
 {
-  "version": "1.3.14",
+  "version": "1.3.15",
   "name": "Saqr Edge Agent",
   "releaseDate": "2026-11-21",
   "asarUrl": "/downloads/app.asar",
   "zipUrl": "/downloads/Saqr-Edge-Agent-Win64.zip",
   "changelog": [
-    "إصلاح خطأ فحص واستخراج قنوات الـ DVR (Cannot set properties of null) وحماية العدادات من الانهيار",
-    "سحب كافة قنوات الكاميرات المتصلة بالـ NVR/DVR تلقائياً (قنوات D1 حتى D16) عبر IP موحد للـ NVR",
-    "تحديث خوارزمية الربط بالـ Hikvision عبر ISAPI و Streaming Channels لضمان قراءة قنوات الكاميرات الداخلية المعزولة",
-    "إلغاء التداخل والتكرار عند وجود أسماء افتراضية متطابقة للكاميرات (Camera 01) وتخصيص قنوات فريدة لكل كاميرا"
+    "تصفية واستخراج القنوات النشطة فقط (Active Connected Channels D1-D11) وتجاهل القنوات الفارغة غير المتصلة بجهاز الـ NVR",
+    "تحديث عنوان الـ IP الافتراضي إلى 192.168.8.57 الخاص بالـ NVR",
+    "إلغاء المولد التلقائي للقنوات الوهمية ومنع إضافة كاميرات فارغة",
+    "فصل وعزل تدفقات البث لكل قناة على حدة لمنع تكرار أو اختلاط البث"
   ],
-  "releaseNotes": "v1.3.14: NVR/DVR 16-Channel Auto-Extraction Fix & Multi-Channel Isolation Support"
+  "releaseNotes": "v1.3.15: Active Channel Precision Filter & NVR IP Correction"
 }

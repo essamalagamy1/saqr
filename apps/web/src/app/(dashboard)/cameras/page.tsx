@@ -75,7 +75,7 @@ export default function CamerasPage() {
   const [dvrDeviceInfo, setDvrDeviceInfo] = useState<{ model?: string; totalChannels?: number } | null>(null);
   const [dvrChannels, setDvrChannels] = useState<DvrChannelItem[]>([]);
   const [dvrForm, setDvrForm] = useState({
-    ip: '192.168.8.234',
+    ip: '192.168.8.57',
     port: 80,
     rtspPort: 554,
     username: 'admin',
