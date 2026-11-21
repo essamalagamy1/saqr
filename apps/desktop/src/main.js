@@ -514,12 +514,25 @@ ipcMain.handle('cameras:syncAllToCloud', async () => {
 
       if (serverCams.length > 0) {
         const serverIdSet = new Set(serverCams.map(s => s.id));
+        const serverCamMap = new Map(serverCams.map(s => [s.id, s]));
+
         // Prune cameras that have a server ID that no longer exists on server (were deleted)
-        const kept = localCameras.filter(c => !c.id || c.id.length < 20 || serverIdSet.has(c.id));
-        if (kept.length !== localCameras.length) {
-          localCameras = kept;
-          store.set('cameras', localCameras);
-        }
+        localCameras = localCameras.filter(c => !c.id || c.id.length < 20 || serverIdSet.has(c.id));
+
+        // Merge latest cloud configuration (roles, enabled services, zones) into local cameras
+        localCameras = localCameras.map(cam => {
+          const remote = serverCamMap.get(cam.id);
+          if (!remote) return cam;
+          return {
+            ...cam,
+            config: remote.config ?? cam.config,
+            zone_type: remote.zone_type ?? cam.zone_type,
+            zone_name: remote.zone_name ?? cam.zone_name,
+            branch_id: remote.branch_id ?? cam.branch_id,
+          };
+        });
+
+        store.set('cameras', localCameras);
       }
     }
   } catch (err) {

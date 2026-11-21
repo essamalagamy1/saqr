@@ -19,16 +19,21 @@ const COCO_CLASSES = [
 class AIEngine {
   constructor(options = {}) {
     this.modelPath = options.modelPath || path.join(__dirname, '..', 'models', 'yolox_s.onnx');
-    this.confThreshold = options.confThreshold || 0.22; // calibrated for distant CCTV persons
+    this.confThreshold = options.confThreshold || 0.30; // Calibrated for CCTV surveillance (filters false shadows/chairs)
     this.nmsThreshold = options.nmsThreshold || 0.45;
     this.inputSize = options.inputSize || [640, 640];
     this.classes = options.classes || COCO_CLASSES;
     this.session = null;
+    this.maskSession = null;
     this.ready = false;
     this.prevFrames = new Map(); // cameraId -> grayscale buffer for motion analysis
 
     // Performance Optimization: Precompute grid coordinates and strides once at startup
     this.gridCache = this._getStridesAndGrids(this.inputSize[0], this.inputSize[1]);
+  }
+
+  get hasMaskClassifier() {
+    return !!this.maskSession;
   }
 
   /**
@@ -88,9 +93,79 @@ class AIEngine {
 
       this.session = session;
       this.ready = true;
+
+      // 3. Load Secondary Multi-Model Classifier for PPE & Mask Detection
+      const maskCandidatePaths = [
+        path.join(__dirname, '..', 'models', 'mask_classifier.onnx'),
+        path.join(process.resourcesPath || '', 'models', 'mask_classifier.onnx'),
+        path.join(process.resourcesPath || '', 'app.asar.unpacked', 'models', 'mask_classifier.onnx'),
+        path.join(process.cwd(), 'models', 'mask_classifier.onnx'),
+      ];
+
+      for (const mp of maskCandidatePaths) {
+        if (mp && fs.existsSync(mp)) {
+          try {
+            this.maskSession = await ort.InferenceSession.create(mp, {
+              executionProviders: process.platform === 'win32' ? ['dml', 'cpu'] : ['cpu'],
+              graphOptimizationLevel: 'all',
+            });
+            console.log(`[AI] 🧠 MobileNetV2 Face Mask Classifier loaded from ${mp}`);
+            break;
+          } catch (mErr) {
+            console.warn('[AI] Could not load mask classifier:', mErr.message);
+          }
+        }
+      }
     } catch (err) {
       console.error('[AI] Failed to load YOLOX model:', err.message);
       this.session = null;
+    }
+  }
+
+  /**
+   * Classify whether a cropped face ROI has a face mask using the secondary MobileNetV2 ONNX model.
+   * Input: 224x224 RGB, Normalized: (pixel / 127.5) - 1.0.
+   * Output: [probMask, probNoMask].
+   */
+  async classifyFaceMask(rawFrame, faceBox) {
+    if (!this.maskSession || !rawFrame || !faceBox) return null;
+    try {
+      const sharp = require('sharp');
+      const ort = require('onnxruntime-node');
+
+      const [x1, y1, x2, y2] = faceBox;
+      const w = Math.max(10, x2 - x1);
+      const h = Math.max(10, y2 - y1);
+
+      const croppedBuffer = await sharp(rawFrame)
+        .extract({ left: x1, top: y1, width: w, height: h })
+        .resize(224, 224, { fit: 'fill' })
+        .removeAlpha()
+        .raw()
+        .toBuffer();
+
+      const float32 = new Float32Array(1 * 224 * 224 * 3);
+      for (let i = 0; i < croppedBuffer.length; i++) {
+        float32[i] = (croppedBuffer[i] / 127.5) - 1.0;
+      }
+
+      const tensor = new ort.Tensor('float32', float32, [1, 224, 224, 3]);
+      const inputName = this.maskSession.inputNames[0];
+      const results = await this.maskSession.run({ [inputName]: tensor });
+      const outputName = this.maskSession.outputNames[0];
+      const outData = results[outputName].data;
+
+      const maskProb = parseFloat(outData[0].toFixed(3));
+      const noMaskProb = parseFloat(outData[1].toFixed(3));
+
+      return {
+        hasMask: maskProb > noMaskProb,
+        maskProb,
+        noMaskProb,
+      };
+    } catch (e) {
+      console.warn('[AI] Face mask classifier error:', e.message);
+      return null;
     }
   }
 

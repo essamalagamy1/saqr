@@ -67,6 +67,7 @@ func SetupRoutes(app *fiber.App, db *pgxpool.Pool, redisClient *redis.Client, no
 	camGroup.Get("/", cameraHandler.List)
 	camGroup.Post("/", cameraHandler.Create)
 	camGroup.Patch("/:id/status", cameraHandler.UpdateStatus)
+	camGroup.Patch("/:id/config", cameraHandler.UpdateConfig)
 	camGroup.Delete("/bulk/all", cameraHandler.DeleteAll)
 	camGroup.Delete("/:id", cameraHandler.Delete)
 

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Camera, Plus, Video, Trash2, Power, CheckCircle, Clock, RefreshCw, Loader2, AlertCircle, Search, Radio, ShieldCheck, Download, Building2 } from 'lucide-react';
+import { Camera, Plus, Video, Trash2, Power, CheckCircle, Clock, RefreshCw, Loader2, AlertCircle, Search, Radio, ShieldCheck, Download, Building2, Sliders, Brain, ChefHat, DoorOpen, Users, Smartphone, ShieldAlert, Sparkles, Check } from 'lucide-react';
 import { api } from '@/lib/api';
 
 interface CameraItem {
@@ -10,11 +10,13 @@ interface CameraItem {
   branch_id?: string;
   branch_name?: string;
   zone_name?: string;
+  zone_type?: string;
   dvr_ip?: string;
   dvr_channel?: string;
   protocol?: string;
   rtsp_url?: string;
   status: string;
+  config?: string;
   created_at?: string;
 }
 
@@ -92,6 +94,140 @@ export default function CamerasPage() {
     dvr_channel: 'CH1',
     protocol: 'rtsp',
   });
+
+  // Camera AI Customization States
+  const [selectedCamForAi, setSelectedCamForAi] = useState<CameraItem | null>(null);
+  const [savingAiConfig, setSavingAiConfig] = useState(false);
+  const [currentRole, setCurrentRole] = useState<'kitchen' | 'entrance' | 'lobby' | 'warehouse' | 'general' | 'custom'>('kitchen');
+  const [enabledServices, setEnabledServices] = useState<string[]>([]);
+  const [cooldownSec, setCooldownSec] = useState<number>(180);
+
+  const openAiConfigModal = (cam: CameraItem) => {
+    let parsed: any = {};
+    try {
+      parsed = typeof cam.config === 'string' ? JSON.parse(cam.config) : (cam.config || {});
+    } catch {}
+
+    const role = parsed.role || (
+      cam.name.includes('مطبخ') || cam.name.includes('D8') || cam.name.includes('CH8') || cam.name.includes('CH3') || cam.name.includes('CH4')
+        ? 'kitchen'
+        : (cam.name.includes('مدخل') || cam.name.includes('D1') || cam.name.includes('CH1') ? 'entrance' : 'general')
+    );
+
+    setCurrentRole(role);
+    if (Array.isArray(parsed.enabled_services) && parsed.enabled_services.length > 0) {
+      setEnabledServices(parsed.enabled_services);
+    } else if (role === 'kitchen') {
+      setEnabledServices(['kitchen_ppe', 'phone_usage']);
+    } else if (role === 'entrance') {
+      setEnabledServices(['visitor_counting', 'employee_monitoring']);
+    } else {
+      setEnabledServices(['employee_monitoring']);
+    }
+    setCooldownSec(parsed.cooldown_seconds || (role === 'kitchen' ? 180 : 60));
+    setSelectedCamForAi(cam);
+  };
+
+  const applyPresetRole = (role: 'kitchen' | 'entrance' | 'lobby' | 'warehouse' | 'general') => {
+    setCurrentRole(role);
+    if (role === 'kitchen') {
+      setEnabledServices(['kitchen_ppe', 'phone_usage']);
+      setCooldownSec(180);
+    } else if (role === 'entrance') {
+      setEnabledServices(['visitor_counting', 'employee_monitoring']);
+      setCooldownSec(30);
+    } else if (role === 'lobby') {
+      setEnabledServices(['loitering_detection', 'employee_monitoring']);
+      setCooldownSec(180);
+    } else if (role === 'warehouse') {
+      setEnabledServices(['loitering_detection', 'employee_monitoring']);
+      setCooldownSec(300);
+    } else {
+      setEnabledServices(['employee_monitoring']);
+      setCooldownSec(60);
+    }
+  };
+
+  const toggleAiService = (slug: string) => {
+    setEnabledServices((prev) =>
+      prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug]
+    );
+  };
+
+  const handleSaveAiConfig = async () => {
+    if (!selectedCamForAi) return;
+    setSavingAiConfig(true);
+    try {
+      const configPayload = {
+        role: currentRole,
+        enabled_services: enabledServices,
+        cooldown_seconds: cooldownSec,
+      };
+      await api.patch(`/cameras/${selectedCamForAi.id}/config`, { config: configPayload });
+      setCameras((prev) =>
+        prev.map((c) =>
+          c.id === selectedCamForAi.id ? { ...c, config: JSON.stringify(configPayload) } : c
+        )
+      );
+      setSelectedCamForAi(null);
+    } catch (err: any) {
+      alert('فشل حفظ إعدادات الذكاء الاصطناعي: ' + (err.message || 'خطأ غير معروف'));
+    } finally {
+      setSavingAiConfig(false);
+    }
+  };
+
+  const getCameraRoleBadge = (cam: CameraItem) => {
+    let parsed: any = {};
+    try {
+      parsed = typeof cam.config === 'string' ? JSON.parse(cam.config) : (cam.config || {});
+    } catch {}
+
+    const role = parsed.role || (
+      cam.name.includes('مطبخ') || cam.name.includes('D8') || cam.name.includes('CH8') || cam.name.includes('CH3') || cam.name.includes('CH4')
+        ? 'kitchen'
+        : (cam.name.includes('مدخل') || cam.name.includes('D1') || cam.name.includes('CH1') ? 'entrance' : 'general')
+    );
+
+    const svcs: string[] = Array.isArray(parsed.enabled_services) ? parsed.enabled_services : [];
+
+    if (role === 'kitchen') {
+      return (
+        <span className="inline-flex items-center gap-1.5 rounded-md bg-rose-500/10 border border-rose-500/25 px-2 py-0.5 text-[11px] font-bold text-rose-300">
+          <ChefHat className="h-3 w-3 text-rose-400" />
+          مطبخ (PPE + جوال)
+        </span>
+      );
+    } else if (role === 'entrance') {
+      return (
+        <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/25 px-2 py-0.5 text-[11px] font-bold text-emerald-300">
+          <DoorOpen className="h-3 w-3 text-emerald-400" />
+          مدخل (عد زوار)
+        </span>
+      );
+    } else if (role === 'lobby') {
+      return (
+        <span className="inline-flex items-center gap-1.5 rounded-md bg-sky-500/10 border border-sky-500/25 px-2 py-0.5 text-[11px] font-bold text-sky-300">
+          <Users className="h-3 w-3 text-sky-400" />
+          صالة (تسكع + انتظار)
+        </span>
+      );
+    } else if (role === 'warehouse') {
+      return (
+        <span className="inline-flex items-center gap-1.5 rounded-md bg-purple-500/10 border border-purple-500/25 px-2 py-0.5 text-[11px] font-bold text-purple-300">
+          <ShieldAlert className="h-3 w-3 text-purple-400" />
+          مستودع / منطقة محظورة
+        </span>
+      );
+    }
+
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-md bg-slate-800 border border-slate-700 px-2 py-0.5 text-[11px] text-slate-300">
+        <Brain className="h-3 w-3 text-amber-400" />
+        {svcs.length > 0 ? `مخصص (${svcs.length} خدمات)` : 'عام (مراقبة حركة)'}
+      </span>
+    );
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -558,6 +694,7 @@ export default function CamerasPage() {
               <tr>
                 <th className="px-5 py-3.5 font-semibold">اسم الكاميرا</th>
                 <th className="px-5 py-3.5 font-semibold">الفرع</th>
+                <th className="px-5 py-3.5 font-semibold">دور الذكاء الاصطناعي والموديولات</th>
                 <th className="px-5 py-3.5 font-semibold">عنوان الـ DVR / القناة</th>
                 <th className="px-5 py-3.5 font-semibold">البروتوكول</th>
                 <th className="px-5 py-3.5 font-semibold">الحالة</th>
@@ -567,14 +704,14 @@ export default function CamerasPage() {
             <tbody className="divide-y divide-slate-800/60 text-slate-300">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-slate-500">
+                  <td colSpan={7} className="py-12 text-center text-slate-500">
                     <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2 text-amber-500" />
                     جاري تحميل الكاميرات من قاعدة البيانات...
                   </td>
                 </tr>
               ) : cameras.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-slate-500">
+                  <td colSpan={7} className="py-12 text-center text-slate-500">
                     <p className="mb-4 text-sm text-slate-400">لم يتم تسجيل أي كاميرا حتى الآن في قاعدة البيانات.</p>
                     <div className="flex flex-wrap items-center justify-center gap-3">
                       <button
@@ -618,6 +755,9 @@ export default function CamerasPage() {
                       <td className="px-5 py-3.5">
                         {cam.branch_name || branches.find((b) => b.id === cam.branch_id)?.name || branches[0]?.name || 'الفرع الرئيسي'}
                       </td>
+                      <td className="px-5 py-3.5">
+                        {getCameraRoleBadge(cam)}
+                      </td>
                       <td className="px-5 py-3.5 font-mono text-slate-400">
                         {(cam.dvr_ip || (cam.rtsp_url ? (cam.rtsp_url.match(/@?([0-9.]+)/)?.[1] || '') : '')) || '192.168.8.234'} • {cam.dvr_channel || 'CH1'}
                       </td>
@@ -637,6 +777,14 @@ export default function CamerasPage() {
                       </td>
                       <td className="px-5 py-3.5 text-center">
                         <div className="flex items-center justify-center gap-2">
+                          <button
+                            onClick={() => openAiConfigModal(cam)}
+                            title="تخصيص موديولات الذكاء الاصطناعي والدور"
+                            className="p-1.5 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-400 hover:bg-sky-500/20 hover:text-sky-300 transition-colors flex items-center gap-1 font-bold px-2.5"
+                          >
+                            <Sliders className="h-3.5 w-3.5" />
+                            <span className="text-[10px]">تخصيص AI</span>
+                          </button>
                           <button
                             onClick={() => handleToggleStatus(cam)}
                             title={isActive ? 'إيقاف البث' : 'تفعيل البث'}
@@ -1189,6 +1337,349 @@ export default function CamerasPage() {
                   )}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Camera AI Customization Modal */}
+      {selectedCamForAi && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md">
+          <div className="w-full max-w-2xl rounded-2xl border border-slate-700 bg-[#0d1527] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-5 border-b border-slate-800 bg-slate-900/80">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-gradient-to-br from-amber-500/20 to-sky-500/20 border border-amber-500/30 text-amber-400">
+                  <Brain className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <span>تخصيص موديولات الذكاء الاصطناعي والدور</span>
+                    <span className="text-xs font-mono px-2 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 text-sky-400">
+                      {selectedCamForAi.name}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    حدد بيئة عمل الكاميرا والخدمات المصرح بتشغيلها لمنع الإنذارات العشوائية وتوجيه الموديل بدقة
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedCamForAi(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-6">
+              {/* Presets Grid */}
+              <div>
+                <label className="block text-slate-200 font-bold text-xs mb-2.5 flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-amber-400" />
+                  <span>الأنماط الجاهزة السريعة (One-Click Presets):</span>
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => applyPresetRole('kitchen')}
+                    className={`p-3 rounded-xl border text-right transition flex flex-col justify-between ${
+                      currentRole === 'kitchen'
+                        ? 'border-rose-500 bg-rose-500/15 shadow-lg shadow-rose-500/10'
+                        : 'border-slate-800 bg-slate-900/50 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full mb-1">
+                      <ChefHat className={`h-5 w-5 ${currentRole === 'kitchen' ? 'text-rose-400' : 'text-slate-400'}`} />
+                      {currentRole === 'kitchen' && <Check className="h-3.5 w-3.5 text-rose-400" />}
+                    </div>
+                    <div className="font-bold text-xs text-white">مطبخ وتحضير</div>
+                    <div className="text-[10px] text-slate-400 mt-1">PPE كمامة + جوال (يمنع عد الزوار والتسكع)</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => applyPresetRole('entrance')}
+                    className={`p-3 rounded-xl border text-right transition flex flex-col justify-between ${
+                      currentRole === 'entrance'
+                        ? 'border-emerald-500 bg-emerald-500/15 shadow-lg shadow-emerald-500/10'
+                        : 'border-slate-800 bg-slate-900/50 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full mb-1">
+                      <DoorOpen className={`h-5 w-5 ${currentRole === 'entrance' ? 'text-emerald-400' : 'text-slate-400'}`} />
+                      {currentRole === 'entrance' && <Check className="h-3.5 w-3.5 text-emerald-400" />}
+                    </div>
+                    <div className="font-bold text-xs text-white">مدخل وبوابة</div>
+                    <div className="text-[10px] text-slate-400 mt-1">عد الزوار (دخول/خروج) وتوافد</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => applyPresetRole('lobby')}
+                    className={`p-3 rounded-xl border text-right transition flex flex-col justify-between ${
+                      currentRole === 'lobby'
+                        ? 'border-sky-500 bg-sky-500/15 shadow-lg shadow-sky-500/10'
+                        : 'border-slate-800 bg-slate-900/50 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full mb-1">
+                      <Users className={`h-5 w-5 ${currentRole === 'lobby' ? 'text-sky-400' : 'text-slate-400'}`} />
+                      {currentRole === 'lobby' && <Check className="h-3.5 w-3.5 text-sky-400" />}
+                    </div>
+                    <div className="font-bold text-xs text-white">صالة واستقبال</div>
+                    <div className="text-[10px] text-slate-400 mt-1">كشف التسكع والانتظار العام</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => applyPresetRole('warehouse')}
+                    className={`p-3 rounded-xl border text-right transition flex flex-col justify-between ${
+                      currentRole === 'warehouse'
+                        ? 'border-purple-500 bg-purple-500/15 shadow-lg shadow-purple-500/10'
+                        : 'border-slate-800 bg-slate-900/50 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full mb-1">
+                      <ShieldAlert className={`h-5 w-5 ${currentRole === 'warehouse' ? 'text-purple-400' : 'text-slate-400'}`} />
+                      {currentRole === 'warehouse' && <Check className="h-3.5 w-3.5 text-purple-400" />}
+                    </div>
+                    <div className="font-bold text-xs text-white">منطقة محظورة</div>
+                    <div className="text-[10px] text-slate-400 mt-1">تسكع وحركة وتسلل ليلي</div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Individual Services Toggle List */}
+              <div className="space-y-3">
+                <label className="block text-slate-200 font-bold text-xs flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <Sliders className="h-4 w-4 text-sky-400" />
+                    <span>الخدمات والموديولات النشطة على هذه الكاميرا:</span>
+                  </span>
+                  <span className="text-[11px] text-slate-400">
+                    مفعل ({enabledServices.length} من 5)
+                  </span>
+                </label>
+
+                <div className="space-y-2">
+                  {/* Service 1: PPE */}
+                  <div
+                    onClick={() => toggleAiService('kitchen_ppe')}
+                    className={`p-3.5 rounded-xl border transition cursor-pointer flex items-center justify-between ${
+                      enabledServices.includes('kitchen_ppe')
+                        ? 'bg-rose-500/10 border-rose-500/30'
+                        : 'bg-slate-900/40 border-slate-800 opacity-60 hover:opacity-100'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2 rounded-lg ${enabledServices.includes('kitchen_ppe') ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-800 text-slate-500'}`}>
+                        <ChefHat className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <div className="font-bold text-xs text-white flex items-center gap-2">
+                          <span>سلامة المطبخ (PPE)</span>
+                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300">أولوية عليا</span>
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">
+                          رصد عدم ارتداء الكمامة الطبية أو غطاء الرأس والشعر للعاملين (فحص منطقة الوجه Two-Stage)
+                        </div>
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={enabledServices.includes('kitchen_ppe')}
+                      onChange={() => {}}
+                      className="h-4 w-4 rounded border-slate-700 text-rose-600 focus:ring-rose-500"
+                    />
+                  </div>
+
+                  {/* Service 2: Phone */}
+                  <div
+                    onClick={() => toggleAiService('phone_usage')}
+                    className={`p-3.5 rounded-xl border transition cursor-pointer flex items-center justify-between ${
+                      enabledServices.includes('phone_usage')
+                        ? 'bg-purple-500/10 border-purple-500/30'
+                        : 'bg-slate-900/40 border-slate-800 opacity-60 hover:opacity-100'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2 rounded-lg ${enabledServices.includes('phone_usage') ? 'bg-purple-500/20 text-purple-400' : 'bg-slate-800 text-slate-500'}`}>
+                        <Smartphone className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <div className="font-bold text-xs text-white flex items-center gap-2">
+                          <span>كشف استخدام الجوال (Phone Usage)</span>
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">
+                          رصد انشغال الموظفين أو الطهاة بالهاتف في اليدين أو على الأذن أثناء ساعات العمل
+                        </div>
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={enabledServices.includes('phone_usage')}
+                      onChange={() => {}}
+                      className="h-4 w-4 rounded border-slate-700 text-purple-600 focus:ring-purple-500"
+                    />
+                  </div>
+
+                  {/* Service 3: Visitor Counting */}
+                  <div
+                    onClick={() => toggleAiService('visitor_counting')}
+                    className={`p-3.5 rounded-xl border transition cursor-pointer flex items-center justify-between ${
+                      enabledServices.includes('visitor_counting')
+                        ? 'bg-emerald-500/10 border-emerald-500/30'
+                        : 'bg-slate-900/40 border-slate-800 opacity-60 hover:opacity-100'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2 rounded-lg ${enabledServices.includes('visitor_counting') ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
+                        <DoorOpen className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <div className="font-bold text-xs text-white flex items-center gap-2">
+                          <span>عد الزوار والتوافد (Visitor Counting)</span>
+                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300">بوابات فقط</span>
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">
+                          حساب عدد الداخلين والخارجين عبر خط عبور البوابة الافتراضي وقياس إجمالي الحركة
+                        </div>
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={enabledServices.includes('visitor_counting')}
+                      onChange={() => {}}
+                      className="h-4 w-4 rounded border-slate-700 text-emerald-600 focus:ring-emerald-500"
+                    />
+                  </div>
+
+                  {/* Service 4: Loitering */}
+                  <div
+                    onClick={() => toggleAiService('loitering_detection')}
+                    className={`p-3.5 rounded-xl border transition cursor-pointer flex items-center justify-between ${
+                      enabledServices.includes('loitering_detection')
+                        ? 'bg-amber-500/10 border-amber-500/30'
+                        : 'bg-slate-900/40 border-slate-800 opacity-60 hover:opacity-100'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2 rounded-lg ${enabledServices.includes('loitering_detection') ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-800 text-slate-500'}`}>
+                        <Clock className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <div className="font-bold text-xs text-white flex items-center gap-2">
+                          <span>كشف التسكع والانتظار (Loitering Detection)</span>
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">
+                          تنبيه عند وقوف الأفراد لأكثر من 45 ثانية في أماكن غير مخصصة للانتظار
+                        </div>
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={enabledServices.includes('loitering_detection')}
+                      onChange={() => {}}
+                      className="h-4 w-4 rounded border-slate-700 text-amber-600 focus:ring-amber-500"
+                    />
+                  </div>
+
+                  {/* Service 5: Employee Monitoring */}
+                  <div
+                    onClick={() => toggleAiService('employee_monitoring')}
+                    className={`p-3.5 rounded-xl border transition cursor-pointer flex items-center justify-between ${
+                      enabledServices.includes('employee_monitoring')
+                        ? 'bg-sky-500/10 border-sky-500/30'
+                        : 'bg-slate-900/40 border-slate-800 opacity-60 hover:opacity-100'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2 rounded-lg ${enabledServices.includes('employee_monitoring') ? 'bg-sky-500/20 text-sky-400' : 'bg-slate-800 text-slate-500'}`}>
+                        <Users className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <div className="font-bold text-xs text-white flex items-center gap-2">
+                          <span>حركة وتواجد الأفراد (Presence Monitoring)</span>
+                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-400">أولوية منخفضة</span>
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">
+                          رصد التواجد والحركة العامة بدون إنذارات في حال عدم وجود أي مخالفات سلامة
+                        </div>
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={enabledServices.includes('employee_monitoring')}
+                      onChange={() => {}}
+                      className="h-4 w-4 rounded border-slate-700 text-sky-600 focus:ring-sky-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Cooldown Settings */}
+              <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-slate-200 font-bold text-xs flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-amber-400" />
+                    <span>فترة الصمت بين الإنذارات المتكررة لنفس الكاميرا (Cooldown):</span>
+                  </label>
+                  <span className="font-mono font-bold text-xs text-amber-400">
+                    {cooldownSec} ثانية ({Math.round(cooldownSec / 60)} دقيقة)
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 pt-1">
+                  {[30, 60, 120, 180, 300].map((sec) => (
+                    <button
+                      key={sec}
+                      type="button"
+                      onClick={() => setCooldownSec(sec)}
+                      className={`px-3 py-1 rounded-lg text-xs font-mono transition border ${
+                        cooldownSec === sec
+                          ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 font-bold'
+                          : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {sec}ث
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-slate-500 pt-1">
+                  تمنع إرسال إنذارات متكررة لنفس الشخص أو نفس الكاميرا حتى انتهاء فترة الصمت، مما يمنع إزعاج الإشعارات.
+                </p>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between p-4 border-t border-slate-800 bg-[#0b1222]">
+              <button
+                type="button"
+                onClick={() => setSelectedCamForAi(null)}
+                className="rounded-lg bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700 transition"
+              >
+                إلغاء
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSaveAiConfig}
+                disabled={savingAiConfig}
+                className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 px-6 py-2.5 text-xs font-bold text-black hover:from-amber-400 hover:to-amber-500 disabled:opacity-50 transition shadow-lg shadow-amber-500/20"
+              >
+                {savingAiConfig ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin text-black" />
+                    <span>جاري حفظ الإعدادات...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className="h-4 w-4 text-black" />
+                    <span>حفظ وتطبيق إعدادات الذكاء الاصطناعي</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>

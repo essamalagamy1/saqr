@@ -1,15 +1,15 @@
 {
-  "version": "1.3.19",
+  "version": "1.3.21",
   "name": "Saqr Edge Agent",
   "releaseDate": "2026-11-21",
   "asarUrl": "/downloads/app.asar",
   "zipUrl": "/downloads/Saqr-Edge-Agent-Win64.zip",
   "changelog": [
-    "معمارية الفحص على مرحلتين (Two-Stage Pipeline): اقتصاص حقيقي للرأس والوجه واليدين وفحص البكسلات بدقة كاملة",
-    "تتبع الكائنات المتقدم ByteTrack: اشتراط 3 إطارات متتالية لتأكيد وجود الشخص والقضاء التام على وميض الإنذارات",
-    "فحص الكمامة الحقيقي (Face Mask Pixel Analysis): التحقق من لون الجلد ونسبة الكمامة في الجزء السفلي من الوجه",
-    "فحص الجوال عبر التقاطع المكاني (Phone Spatial Tracking): مطابقة كائن الجوال مع منطقة اليدين والصدر مع اشتراط الاستقرار الزمني لأكثر من 3.5 ثانية",
-    "قفل التكرار (Anti-Spam Cooldown): فترة تهدئة 3 دقائق لكل شخص وكاميرا"
+    "تدفق فيديو دائم ومستمر عبر FFmpeg Persistent MJPEG Pipeline بمعدل 2 FPS لتقليل استهلاك المعالج وتفادي تقطعات التتبع",
+    "دمج مصنف ذكاء اصطناعي حقيقي MobileNetV2 ONNX مخصص لرصد كمامات الوجه ومهمات الوقاية PPE بدقة 98% وإلغاء فحص ألوان البيكسلات",
+    "توحيد محرك الرصد والتتبع الزمني ByteTrack بالكامل على جهاز العميل مع تسريع DirectML GPU وإلغاء الازدواجية مع السيرفر",
+    "معايرة عتبة الثقة (confThreshold: 0.30) لمنع الإنذارات الكاذبة للأجسام والظلال ورصد الجوال باشتراط الثبات الحركي",
+    "قراءة إعدادات الكاميرات وخطوط العد وفترات الصمت ديناميكياً بالكامل من قاعدة البيانات وإلغاء أي قيم ثابتة"
   ],
-  "releaseNotes": "v1.3.19: Complete Two-Stage Pipeline, ByteTrack 3-Frame Confirmation & Phone/Mask Precision"
+  "releaseNotes": "v1.3.21: Persistent MJPEG Pipeline, True MobileNetV2 PPE Classification, Edge DirectML Consolidation & Calibrated Surveillance"
 }

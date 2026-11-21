@@ -1,102 +1,23 @@
 // Saqr Edge Agent — Agent Runner (Orchestrator)
+// Runs on client edge with hardware acceleration (DirectML GPU / CPU)
+// Persistent FFmpeg video pipeline + ByteTrack + Multi-Service AI Detection
+
 const CameraWorker = require('./camera-worker');
 const AIEngine = require('./ai-engine');
 const ApiClient = require('./api-client');
-
-/**
- * Tracks objects across frames to prevent alert spam.
- * Only triggers an event when a new object enters or after a re-alert cooldown.
- */
-class ObjectTracker {
-  constructor(options = {}) {
-    this.iouThreshold = options.iouThreshold || 0.25;
-    this.reAlertIntervalMs = options.reAlertIntervalMs || 180000; // 3 minutes cooldown (anti-spam)
-    this.trackMaxAgeMs = options.trackMaxAgeMs || 15000; // 15s without seeing person = person left scene
-    this.tracks = new Map(); // camera_id -> [ { id, label, box, firstSeen, lastSeen, lastAlerted } ]
-  }
-
-  filterNewDetections(cameraId, detections) {
-    const now = Date.now();
-    let cameraTracks = this.tracks.get(cameraId) || [];
-
-    // Remove tracks that haven't been seen for trackMaxAgeMs (person walked away)
-    cameraTracks = cameraTracks.filter(t => (now - t.lastSeen) < this.trackMaxAgeMs);
-
-    const newEvents = [];
-
-    for (const det of detections) {
-      let matchedTrack = null;
-      let highestIou = 0;
-
-      for (const track of cameraTracks) {
-        if (track.label === det.label) {
-          const iou = this._computeIOU(track.box, det.box);
-          if (iou > this.iouThreshold && iou > highestIou) {
-            highestIou = iou;
-            matchedTrack = track;
-          }
-        }
-      }
-
-      if (matchedTrack) {
-        // Persistent object — update position, lastSeen, and hit counter
-        matchedTrack.lastSeen = now;
-        matchedTrack.box = det.box;
-        matchedTrack.hits = (matchedTrack.hits || 1) + 1;
-
-        // Multi-frame confirmation: trigger alert on second confirmed hit
-        if (matchedTrack.hits === 2 && !matchedTrack.alertedFirst) {
-          matchedTrack.alertedFirst = true;
-          matchedTrack.lastAlerted = now;
-          newEvents.push(det);
-        } else if (matchedTrack.alertedFirst && (now - matchedTrack.lastAlerted >= this.reAlertIntervalMs)) {
-          // Cooldown expired — send periodic reminder
-          matchedTrack.lastAlerted = now;
-          newEvents.push(det);
-        }
-      } else {
-        // First sighting: register candidate track and wait for 2nd frame confirmation (ByteTrack rule)
-        const newTrack = {
-          id: Math.random().toString(36).slice(2, 9),
-          label: det.label,
-          box: det.box,
-          firstSeen: now,
-          lastSeen: now,
-          lastAlerted: 0,
-          hits: 1,
-          alertedFirst: false,
-        };
-        cameraTracks.push(newTrack);
-      }
-    }
-
-    this.tracks.set(cameraId, cameraTracks);
-    return newEvents;
-  }
-
-  _computeIOU(boxA, boxB) {
-    const x1 = Math.max(boxA[0], boxB[0]);
-    const y1 = Math.max(boxA[1], boxB[1]);
-    const x2 = Math.min(boxA[2], boxB[2]);
-    const y2 = Math.min(boxA[3], boxB[3]);
-
-    const interArea = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
-    const areaA = (boxA[2] - boxA[0]) * (boxA[3] - boxA[1]);
-    const areaB = (boxB[2] - boxB[0]) * (boxB[3] - boxB[1]);
-
-    return interArea / (areaA + areaB - interArea + 1e-6);
-  }
-}
+const DetectionPipeline = require('./detection-pipeline');
 
 class AgentRunner {
   constructor(store, onDetection) {
     this.store = store;
     this.onDetection = onDetection;
     this.cameraWorker = new CameraWorker();
-    this.aiEngine = new AIEngine();
-    this.tracker = new ObjectTracker();
+    this.aiEngine = new AIEngine({ confThreshold: 0.30 });
+    this.pipeline = new DetectionPipeline();
     this.apiClient = null;
     this.running = false;
+    this.cameraBusy = new Map(); // cameraId -> boolean
+    this.lastFrameUpload = new Map(); // cameraId -> timestamp
     this.stats = {
       framesProcessed: 0,
       detectionsFound: 0,
@@ -111,14 +32,14 @@ class AgentRunner {
     this.running = true;
     this.stats.startedAt = new Date();
 
-    console.log('[AGENT] Starting Saqr Edge Agent...');
+    console.log('[AGENT] 🚀 Starting Saqr Edge Agent Engine...');
 
     // Initialize API client
     const serverUrl = this.store.get('serverUrl');
     const accessToken = this.store.get('accessToken');
     this.apiClient = new ApiClient(serverUrl, accessToken);
 
-    // Initialize AI engine
+    // Initialize AI engine (DirectML / CPU)
     try {
       await this.aiEngine.init();
     } catch (err) {
@@ -132,6 +53,7 @@ class AgentRunner {
     if (!this.running) return;
     console.log('[AGENT] Refreshing active camera workers...');
     this.cameraWorker.stopAll();
+    this.cameraBusy.clear();
 
     // Re-check API client in case serverUrl was updated
     const serverUrl = this.store.get('serverUrl');
@@ -144,15 +66,14 @@ class AgentRunner {
       return;
     }
 
-    const interval = this.store.get('detectionInterval', 3);
-    console.log(`[AGENT] Starting capture for ${cameras.length} camera(s) (interval=${interval}s)...`);
+    console.log(`[AGENT] Starting persistent MJPEG pipeline for ${cameras.length} camera(s) at 2 FPS...`);
 
     let delay = 0;
     for (const camera of cameras) {
       let streamUrl = camera.subRtspUrl || camera.rtspUrl;
       if (!streamUrl) continue;
 
-      // Invariant: Guarantee credentials preservation from rtspUrl if subRtspUrl lacks them
+      // Preserve credentials from rtspUrl if subRtspUrl lacks them
       if (camera.rtspUrl && camera.rtspUrl.includes('@') && !streamUrl.includes('@')) {
         const authMatch = camera.rtspUrl.match(/^rtsp[s]?:\/\/([^@]+)@/i);
         if (authMatch) {
@@ -162,34 +83,41 @@ class AgentRunner {
 
       setTimeout(() => {
         if (!this.running) return;
-        console.log(`[AGENT] 🎥 Activating capture worker for: ${camera.name} (${streamUrl.replace(/\/\/[^@]+@/, '//***:***@')})`);
+        const sanitizedUrl = streamUrl.replace(/\/\/[^@]+@/, '//***:***@');
+        console.log(`[AGENT] 🎥 Activating persistent stream: ${camera.name} (${sanitizedUrl})`);
+
         this.cameraWorker.startCapture(
           camera.id,
           streamUrl,
-          interval,
-          async (cameraId, frame, error) => {
+          2, // 2 FPS continuous MJPEG stream
+          async (cameraId, frameBuffer) => {
             if (!this.running) return;
-
-            if (error) {
-              console.error(`[AGENT] Frame capture error (${camera.name}):`, error.message);
-              this.stats.errors++;
-              return;
-            }
-
-            await this._processFrame(camera, frame);
+            await this._processFrame(camera, frameBuffer);
           }
         );
       }, delay);
-      delay += 300; // Stagger connection starts to avoid network / CPU spike
+      delay += 400; // Stagger stream start to avoid network contention
     }
   }
 
   async _processFrame(camera, frameBuffer) {
+    if (!frameBuffer || frameBuffer.length < 5000) return;
+
+    // Drop-on-busy pattern: drop incoming frame if previous inference is still executing
+    if (this.cameraBusy.get(camera.id)) {
+      return;
+    }
+    this.cameraBusy.set(camera.id, true);
+
     try {
       this.stats.framesProcessed++;
+      const now = Date.now();
 
-      // Upload live frame to cloud platform so web dashboard live view displays real camera feed
-      if (frameBuffer && frameBuffer.length > 500 && this.apiClient) {
+      // 1. Non-blocking live frame upload for dashboard preview (throttled to 1 frame / 2 seconds)
+      const lastUpload = this.lastFrameUpload.get(camera.id) || 0;
+      if (now - lastUpload >= 2000 && this.apiClient) {
+        this.lastFrameUpload.set(camera.id, now);
+
         let ip = camera.dvrIp;
         if (!ip && camera.rtspUrl) {
           const m = camera.rtspUrl.match(/@?([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})/);
@@ -208,92 +136,99 @@ class AgentRunner {
         this.apiClient.uploadCameraFrame(camera.id, ip, ch, frameBuffer).catch(() => {});
       }
 
-      // Run AI detection
+      // 2. Run YOLOX Primary Object Detection
       const detections = await this.aiEngine.detect(frameBuffer, camera.id);
       this.stats.detectionsFound += detections.length;
 
-      if (!detections || detections.length === 0) return;
+      const persons = detections.filter(d => d.label === 'person');
+      if (persons.length === 0) {
+        return;
+      }
 
-      // Filter: only trigger new alerts when a new object appears or after cooldown
-      const newDetections = this.tracker.filterNewDetections(camera.id, detections);
-      if (newDetections.length === 0) return;
+      const fw = detections[0]?.frameWidth || 1280;
+      const fh = detections[0]?.frameHeight || 720;
 
-      // When multiple objects/persons are detected, group them into a rich detection
+      // 3. Update ByteTrack Person Tracks across frames
+      const activeTracks = this.pipeline.updatePersonTracks(camera.id, persons, now, fw);
+      if (activeTracks.length === 0) {
+        return;
+      }
+
+      // 4. Multi-Service Two-Stage Evaluation with Priority Arbitration
+      const winner = await this.pipeline.evaluateCandidates(
+        camera,
+        activeTracks,
+        detections,
+        now,
+        fw,
+        fh,
+        frameBuffer,
+        this.aiEngine
+      );
+
+      if (!winner) {
+        return;
+      }
+
+      // 5. Upload Detection Snapshot if client available
       let snapshotUrl = null;
-      if (this.apiClient && frameBuffer && frameBuffer.length > 500) {
-        const snapshotId = `${camera.id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      if (this.apiClient) {
+        const snapshotId = `edge_${camera.id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
         snapshotUrl = await this.apiClient.uploadSnapshot(snapshotId, frameBuffer);
       }
 
-      const colors = ['#3b82f6', '#06b6d4', '#10b981', '#a855f7', '#f59e0b', '#ec4899'];
-      const richBoxes = newDetections.map((det, idx) => {
-        const [x1, y1, x2, y2] = det.box;
-        const fw = det.frameWidth || 640;
-        const fh = det.frameHeight || 360;
-        return {
-          box: det.box,
-          x: det.x ?? parseFloat(((x1 / fw) * 100).toFixed(2)),
-          y: det.y ?? parseFloat(((y1 / fh) * 100).toFixed(2)),
-          width: det.width ?? parseFloat((((x2 - x1) / fw) * 100).toFixed(2)),
-          height: det.height ?? parseFloat((((y2 - y1) / fh) * 100).toFixed(2)),
-          frame_width: fw,
-          frame_height: fh,
-          label: newDetections.length === 1 ? `${det.label} detected` : `${det.label} ${idx + 1} (${Math.round(det.score * 100)}%)`,
-          score: det.score,
-          color: colors[idx % colors.length]
-        };
-      });
-
-      const topDet = newDetections[0];
-      const isMultiple = newDetections.length > 1;
-      const type = isMultiple 
-        ? `رصد أشخاص متعددين (${newDetections.length} أشخاص)`
-        : `${topDet.label} detected`;
-
-      const event = {
+      const eventPayload = {
         camera_id: camera.id,
         camera_name: camera.name,
         branch_id: camera.branchId || camera.branch_id || '',
-        ai_service_slug: 'employee_monitoring',
-        type,
-        severity: isMultiple ? 'medium' : (topDet.label === 'person' ? 'low' : 'medium'),
-        confidence: Math.max(...newDetections.map(d => d.score)),
-        bounding_boxes: JSON.stringify(richBoxes),
+        ai_service_slug: winner.serviceSlug,
+        type: winner.type,
+        severity: winner.severity || 'medium',
+        confidence: parseFloat(winner.confidence.toFixed(2)),
+        bounding_boxes: JSON.stringify(winner.boundingBoxes),
         snapshot_url: snapshotUrl || null,
         metadata: JSON.stringify({
-          class: topDet.label,
-          total_objects: newDetections.length,
-          boxes: richBoxes,
-          source: 'saqr-edge-agent',
+          ...winner.metadata,
+          source: 'saqr-edge-directml',
         }),
       };
 
-      try {
-        await this.apiClient.postDetection(event);
-        this.stats.detectionsSent++;
-        console.log(`[AGENT] ✅ Detection sent: ${type} from ${camera.name} (${richBoxes.length} boxes)`);
-      } catch (err) {
-        console.error(`[AGENT] Failed to send detection:`, err.message);
-        this.stats.errors++;
+      // 6. Ingest Detection to API Server
+      if (this.apiClient) {
+        try {
+          const res = await this.apiClient.postDetection(eventPayload);
+          this.stats.detectionsSent++;
+          if (res.deduplicated) {
+            console.log(`[AGENT] ⚡ Deduplicated alert: "${winner.type}" on ${camera.name}`);
+          } else {
+            console.log(`[AGENT] 🎯 Event logged: "${winner.type}" [${winner.severity}] on ${camera.name}`);
+          }
+        } catch (err) {
+          console.error(`[AGENT] Failed to ingest detection:`, err.message);
+          this.stats.errors++;
+        }
       }
 
-      // Notify renderer
+      // 7. Notify Local Electron Renderer Window
       if (this.onDetection) {
         this.onDetection({
-          ...event,
+          ...eventPayload,
           timestamp: new Date().toISOString(),
-          detection: topDet,
+          winner,
         });
       }
     } catch (err) {
       console.error('[AGENT] Processing error:', err.message);
       this.stats.errors++;
+    } finally {
+      this.cameraBusy.set(camera.id, false);
     }
   }
 
   stop() {
     this.running = false;
     this.cameraWorker.stopAll();
+    this.cameraBusy.clear();
     console.log('[AGENT] Stopped.');
   }
 

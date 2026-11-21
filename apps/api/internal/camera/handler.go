@@ -1,6 +1,8 @@
 package camera
 
 import (
+	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -29,15 +31,16 @@ type Camera struct {
 }
 
 type CreateCameraRequest struct {
-	BranchID   string  `json:"branch_id"`
-	ZoneID     *string `json:"zone_id,omitempty"`
-	Name       string  `json:"name"`
-	RtspURL    string  `json:"rtsp_url"`
-	DvrIP      string  `json:"dvr_ip"`
-	DvrChannel string  `json:"dvr_channel"`
-	Protocol   string  `json:"protocol"`
-	Resolution string  `json:"resolution"`
-	FPS        int     `json:"fps"`
+	BranchID   string                 `json:"branch_id"`
+	ZoneID     *string                `json:"zone_id,omitempty"`
+	Name       string                 `json:"name"`
+	RtspURL    string                 `json:"rtsp_url"`
+	DvrIP      string                 `json:"dvr_ip"`
+	DvrChannel string                 `json:"dvr_channel"`
+	Protocol   string                 `json:"protocol"`
+	Resolution string                 `json:"resolution"`
+	FPS        int                    `json:"fps"`
+	Config     map[string]interface{} `json:"config,omitempty"`
 }
 
 type Handler struct {
@@ -120,6 +123,32 @@ func (h *Handler) Create(c *fiber.Ctx) error {
 		req.FPS = 25
 	}
 
+	// Determine smart default config if not provided
+	var configJSON []byte
+	if req.Config != nil && len(req.Config) > 0 {
+		configJSON, _ = json.Marshal(req.Config)
+	} else {
+		nameLower := strings.ToLower(req.Name)
+		chanUpper := strings.ToUpper(req.DvrChannel)
+		isKitchen := strings.Contains(nameLower, "مطبخ") || strings.Contains(nameLower, "kitchen") ||
+			chanUpper == "CH3" || chanUpper == "CH4" || chanUpper == "CH8" || chanUpper == "D8"
+		isEntrance := strings.Contains(nameLower, "مدخل") || strings.Contains(nameLower, "بوابة") ||
+			strings.Contains(nameLower, "entrance") || chanUpper == "CH1" || chanUpper == "CH2" || chanUpper == "D1" || chanUpper == "D2"
+
+		defaultCfg := map[string]interface{}{}
+		if isKitchen {
+			defaultCfg["role"] = "kitchen"
+			defaultCfg["enabled_services"] = []string{"kitchen_ppe", "phone_usage"}
+		} else if isEntrance {
+			defaultCfg["role"] = "entrance"
+			defaultCfg["enabled_services"] = []string{"visitor_counting", "employee_monitoring"}
+		} else {
+			defaultCfg["role"] = "general"
+			defaultCfg["enabled_services"] = []string{"employee_monitoring"}
+		}
+		configJSON, _ = json.Marshal(defaultCfg)
+	}
+
 	// Check for existing camera in this company to prevent duplicates
 	// For NVR/DVR systems, multiple cameras share the same dvr_ip across different channels (CH1..CH16)
 	// Never match by name alone if dvr_ip or rtsp_url is provided, since NVRs name all channels 'Camera 01' by default
@@ -144,12 +173,13 @@ func (h *Handler) Create(c *fiber.Ctx) error {
 			    dvr_ip = COALESCE(NULLIF($3, ''), dvr_ip),
 			    dvr_channel = COALESCE(NULLIF($4, ''), dvr_channel),
 			    status = 'active',
+			    config = CASE WHEN config IS NULL OR config = '{}'::jsonb THEN $6::jsonb ELSE config END,
 			    updated_at = NOW()
 			WHERE id = $5
-			RETURNING id, branch_id, zone_id, name, COALESCE(rtsp_url_encrypted, ''), COALESCE(dvr_ip, ''), COALESCE(dvr_channel, ''), protocol, resolution, fps, status, created_at, updated_at
+			RETURNING id, branch_id, zone_id, name, COALESCE(rtsp_url_encrypted, ''), COALESCE(dvr_ip, ''), COALESCE(dvr_channel, ''), protocol, resolution, fps, status, config::text, created_at, updated_at
 		`
-		err := h.db.QueryRow(c.Context(), updateQuery, req.Name, req.RtspURL, req.DvrIP, req.DvrChannel, existingID).Scan(
-			&cam.ID, &cam.BranchID, &cam.ZoneID, &cam.Name, &cam.RtspURL, &cam.DvrIP, &cam.DvrChannel, &cam.Protocol, &cam.Resolution, &cam.FPS, &cam.Status, &cam.CreatedAt, &cam.UpdatedAt,
+		err := h.db.QueryRow(c.Context(), updateQuery, req.Name, req.RtspURL, req.DvrIP, req.DvrChannel, existingID, string(configJSON)).Scan(
+			&cam.ID, &cam.BranchID, &cam.ZoneID, &cam.Name, &cam.RtspURL, &cam.DvrIP, &cam.DvrChannel, &cam.Protocol, &cam.Resolution, &cam.FPS, &cam.Status, &cam.Config, &cam.CreatedAt, &cam.UpdatedAt,
 		)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"success": false, "error": err.Error()})
@@ -158,18 +188,43 @@ func (h *Handler) Create(c *fiber.Ctx) error {
 	}
 
 	query := `
-		INSERT INTO cameras (branch_id, zone_id, name, rtsp_url_encrypted, dvr_ip, dvr_channel, protocol, resolution, fps, status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active')
-		RETURNING id, branch_id, zone_id, name, COALESCE(rtsp_url_encrypted, ''), COALESCE(dvr_ip, ''), COALESCE(dvr_channel, ''), protocol, resolution, fps, status, created_at, updated_at
+		INSERT INTO cameras (branch_id, zone_id, name, rtsp_url_encrypted, dvr_ip, dvr_channel, protocol, resolution, fps, status, config)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active', $10::jsonb)
+		RETURNING id, branch_id, zone_id, name, COALESCE(rtsp_url_encrypted, ''), COALESCE(dvr_ip, ''), COALESCE(dvr_channel, ''), protocol, resolution, fps, status, config::text, created_at, updated_at
 	`
-	err := h.db.QueryRow(c.Context(), query, req.BranchID, req.ZoneID, req.Name, req.RtspURL, req.DvrIP, req.DvrChannel, req.Protocol, req.Resolution, req.FPS).Scan(
-		&cam.ID, &cam.BranchID, &cam.ZoneID, &cam.Name, &cam.RtspURL, &cam.DvrIP, &cam.DvrChannel, &cam.Protocol, &cam.Resolution, &cam.FPS, &cam.Status, &cam.CreatedAt, &cam.UpdatedAt,
+	err := h.db.QueryRow(c.Context(), query, req.BranchID, req.ZoneID, req.Name, req.RtspURL, req.DvrIP, req.DvrChannel, req.Protocol, req.Resolution, req.FPS, string(configJSON)).Scan(
+		&cam.ID, &cam.BranchID, &cam.ZoneID, &cam.Name, &cam.RtspURL, &cam.DvrIP, &cam.DvrChannel, &cam.Protocol, &cam.Resolution, &cam.FPS, &cam.Status, &cam.Config, &cam.CreatedAt, &cam.UpdatedAt,
 	)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"success": false, "error": err.Error()})
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"success": true, "data": cam})
+}
+
+// UpdateConfig updates camera configuration JSON (roles, enabled services, ROI zones/lines)
+func (h *Handler) UpdateConfig(c *fiber.Ctx) error {
+	id := c.Params("id")
+	var req struct {
+		Config map[string]interface{} `json:"config"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"success": false, "error": "Invalid request body"})
+	}
+
+	configBytes, err := json.Marshal(req.Config)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"success": false, "error": "Invalid config JSON"})
+	}
+
+	query := `UPDATE cameras SET config = $1::jsonb, updated_at = NOW() WHERE id = $2 RETURNING id, config::text`
+	var camID, updatedConfig string
+	err = h.db.QueryRow(c.Context(), query, string(configBytes), id).Scan(&camID, &updatedConfig)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"success": false, "error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{"success": true, "data": fiber.Map{"id": camID, "config": updatedConfig}})
 }
 
 // UpdateStatus toggles camera status (active/pause/disconnected)

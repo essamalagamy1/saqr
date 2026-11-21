@@ -4,6 +4,10 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 
+// Pre-allocated JPEG marker buffers for high-performance zero-allocation demuxing
+const JPEG_SOI = Buffer.from([0xFF, 0xD8]);
+const JPEG_EOI = Buffer.from([0xFF, 0xD9]);
+
 let sharpInstance = null;
 try {
   sharpInstance = require('sharp');
@@ -345,40 +349,130 @@ class CameraWorker {
   }
 
   /**
-   * Start continuous frame capture at a given interval.
+   * Start continuous high-efficiency frame capture using a persistent FFmpeg pipeline.
+   * Streams MJPEG directly over stdout at steady fps (default 2 FPS) to eliminate process respawning overhead.
    */
-  startCapture(cameraId, rawRtspUrl, intervalSeconds, onFrame) {
+  startCapture(cameraId, rawRtspUrl, fps = 2, onFrame) {
     const rtspUrl = this.normalizeRtspUrl(rawRtspUrl);
     if (this.processes.has(cameraId)) {
       this.stopCapture(cameraId);
     }
 
-    let isCapturing = false;
     let isActive = true;
+    let proc = null;
+    let reconnectTimer = null;
+    let streamBuffer = Buffer.alloc(0);
+    const MAX_BUFFER = 10 * 1024 * 1024; // 10MB safety cap
+    const targetFps = typeof fps === 'number' && fps > 0 ? fps : 2;
 
-    const captureLoop = async () => {
-      if (isCapturing || !isActive) return;
-      isCapturing = true;
+    const startPersistentFfmpeg = () => {
+      if (!isActive) return;
+
+      const ffmpegExe = resolveFfmpegPath();
+      const args = [
+        '-rtsp_transport', 'tcp',
+        '-stimeout', '6000000', // 6s socket timeout
+        '-fflags', '+discardcorrupt+nobuffer',
+        '-flags', 'low_delay',
+        '-analyzeduration', '1000000',
+        '-probesize', '1000000',
+        '-i', rtspUrl,
+        '-vf', `fps=${targetFps},scale='min(1280,iw)':-2`,
+        '-q:v', '3',
+        '-f', 'image2pipe',
+        '-vcodec', 'mjpeg',
+        'pipe:1'
+      ];
+
       try {
-        const frame = await this.captureFrameWithValidation(rtspUrl, 8000);
-        if (isActive) onFrame(cameraId, frame);
-      } catch (err) {
-        if (isActive) onFrame(cameraId, null, err);
-      } finally {
-        isCapturing = false;
+        proc = spawn(ffmpegExe, args, {
+          stdio: ['ignore', 'pipe', 'pipe']
+        });
+      } catch (spawnErr) {
+        console.error(`[CAMERA] Failed to spawn persistent FFmpeg for camera ${cameraId}:`, spawnErr.message);
+        if (isActive) {
+          reconnectTimer = setTimeout(startPersistentFfmpeg, 4000);
+        }
+        return;
       }
+
+      proc.stdout.on('data', (chunk) => {
+        if (!isActive) return;
+        streamBuffer = Buffer.concat([streamBuffer, chunk]);
+
+        // Demux MJPEG frames between SOI (0xFF, 0xD8) and EOI (0xFF, 0xD9)
+        while (streamBuffer.length > 4) {
+          const soiIndex = streamBuffer.indexOf(JPEG_SOI);
+          if (soiIndex === -1) {
+            streamBuffer = streamBuffer.slice(-2);
+            break;
+          }
+
+          if (soiIndex > 0) {
+            // Discard any corrupted leading bytes before SOI
+            streamBuffer = streamBuffer.slice(soiIndex);
+          }
+
+          const eoiIndex = streamBuffer.indexOf(JPEG_EOI, 2);
+          if (eoiIndex === -1) {
+            if (streamBuffer.length > MAX_BUFFER) {
+              streamBuffer = streamBuffer.slice(-2048);
+            }
+            break;
+          }
+
+          const frameEnd = eoiIndex + 2;
+          const frameBuffer = streamBuffer.slice(0, frameEnd);
+          streamBuffer = streamBuffer.slice(frameEnd);
+
+          if (frameBuffer.length >= 6000 && isActive) {
+            try {
+              onFrame(cameraId, frameBuffer);
+            } catch (frameErr) {
+              console.warn(`[CAMERA] onFrame callback error for camera ${cameraId}:`, frameErr.message);
+            }
+          }
+        }
+      });
+
+      let lastStderr = '';
+      proc.stderr.on('data', (chunk) => {
+        lastStderr = chunk.toString().slice(-300);
+      });
+
+      proc.on('close', (code) => {
+        proc = null;
+        if (!isActive) return;
+        console.warn(`[CAMERA] Persistent FFmpeg stream ended for camera ${cameraId} (code=${code}). Reconnecting in 3s... ${lastStderr.slice(-100)}`);
+        reconnectTimer = setTimeout(startPersistentFfmpeg, 3000);
+      });
+
+      proc.on('error', (err) => {
+        console.error(`[CAMERA] Persistent FFmpeg error for camera ${cameraId}:`, err.message);
+      });
     };
 
-    // Stagger initial capture and enforce non-overlapping intervals
-    captureLoop();
-    const intervalMs = Math.max(2, intervalSeconds || 3) * 1000;
-    const timer = setInterval(captureLoop, intervalMs);
+    startPersistentFfmpeg();
+
     this.processes.set(cameraId, {
-      timer,
       rtspUrl,
       stop: () => {
         isActive = false;
-        clearInterval(timer);
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        if (proc) {
+          try {
+            if (process.platform === 'win32' && proc.pid) {
+              spawn('taskkill', ['/pid', String(proc.pid), '/f', '/t']);
+            } else {
+              proc.kill('SIGTERM');
+              setTimeout(() => {
+                try { if (proc) proc.kill('SIGKILL'); } catch {}
+              }, 1500);
+            }
+          } catch {}
+          proc = null;
+        }
+        streamBuffer = Buffer.alloc(0);
       }
     });
   }
@@ -387,10 +481,9 @@ class CameraWorker {
    * Stop capture for a camera.
    */
   stopCapture(cameraId) {
-    const proc = this.processes.get(cameraId);
-    if (proc) {
-      if (typeof proc.stop === 'function') proc.stop();
-      else if (proc.timer) clearInterval(proc.timer);
+    const p = this.processes.get(cameraId);
+    if (p) {
+      if (typeof p.stop === 'function') p.stop();
       this.processes.delete(cameraId);
     }
   }
