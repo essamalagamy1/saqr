@@ -105,13 +105,21 @@ func (h *Handler) Create(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"success": false, "error": "Camera name is required"})
 	}
 
-	// Auto-resolve branch_id if omitted
-	if req.BranchID == "" {
-		_ = h.db.QueryRow(c.Context(), `SELECT id FROM branches WHERE company_id = $1 ORDER BY created_at ASC LIMIT 1`, companyID).Scan(&req.BranchID)
-		if req.BranchID == "" {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"success": false, "error": "No branch found for this company"})
-		}
+	// Auto-resolve or validate branch_id
+	var validBranchID string
+	cleanBranch := strings.TrimSpace(req.BranchID)
+	if cleanBranch != "" && cleanBranch != "default" && cleanBranch != "undefined" && cleanBranch != "null" && len(cleanBranch) == 36 {
+		_ = h.db.QueryRow(c.Context(), `SELECT id FROM branches WHERE id = $1 AND company_id = $2`, cleanBranch, companyID).Scan(&validBranchID)
 	}
+
+	if validBranchID == "" {
+		_ = h.db.QueryRow(c.Context(), `SELECT id FROM branches WHERE company_id = $1 ORDER BY created_at ASC LIMIT 1`, companyID).Scan(&validBranchID)
+	}
+
+	if validBranchID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"success": false, "error": "No branch found for this company"})
+	}
+	req.BranchID = validBranchID
 
 	if req.Protocol == "" {
 		req.Protocol = "rtsp"

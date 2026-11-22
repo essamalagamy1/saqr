@@ -44,8 +44,8 @@ class DetectionPipeline {
 
     // 1. Primary Association: Spatial Overlap (IOU Matching)
     for (const [trackId, track] of tracks.entries()) {
-      // Purge tracks unseen for > 10 seconds
-      if (now - track.lastSeen > 10000) {
+      // Purge tracks unseen for > 60 seconds (retains identity for stationary/partially occluded persons)
+      if (now - track.lastSeen > 60000) {
         tracks.delete(trackId);
         continue;
       }
@@ -103,6 +103,7 @@ class DetectionPipeline {
           firstSeen: now,
           lastSeen: now,
           hits: 1,
+          presenceAlerted: false,
           loiterAlerted: false,
           lastAlertTime: 0,
           countedIn: false,
@@ -205,21 +206,21 @@ class DetectionPipeline {
       const pw = Math.max(10, x2 - x1);
       const ph = Math.max(20, y2 - y1);
 
-      // Person hand/torso ROI
-      const handLeft = Math.max(0, Math.round(x1 + pw * 0.10));
-      const handTop = Math.max(0, Math.round(y1 + ph * 0.20));
-      const handW = Math.min(fw - handLeft, Math.max(10, Math.round(pw * 0.80)));
-      const handH = Math.min(fh - handTop, Math.max(10, Math.round(ph * 0.50)));
+      // Person active phone interaction zone: from ear/head level down to waist/hands
+      const handLeft = Math.max(0, Math.round(x1 - pw * 0.15));
+      const handTop = Math.max(0, Math.round(y1 + ph * 0.05));
+      const handW = Math.min(fw - handLeft, Math.max(10, Math.round(pw * 1.30)));
+      const handH = Math.min(fh - handTop, Math.max(10, Math.round(ph * 0.85)));
       const handBox = [handLeft, handTop, handLeft + handW, handTop + handH];
 
-      // Match YOLOX phone detections with high confidence (>= 0.30)
+      // Match YOLOX phone detections with confidence >= 0.20
       const matchingPhone = phones.find(p => {
-        if (p.score < 0.30) return false;
+        if (p.score < 0.20) return false;
         const [px1, py1, px2, py2] = p.box;
         const pcx = (px1 + px2) / 2;
         const pcy = (py1 + py2) / 2;
-        return pcx >= (handLeft - 15) && pcx <= (handLeft + handW + 15) &&
-               pcy >= (handTop - 15) && pcy <= (handTop + handH + 15);
+        return pcx >= (handLeft - 20) && pcx <= (handLeft + handW + 20) &&
+               pcy >= (handTop - 20) && pcy <= (handTop + handH + 20);
       });
 
       if (matchingPhone) {
@@ -286,13 +287,16 @@ class DetectionPipeline {
 
   isServiceAllowed(slug, camConfig, camera) {
     if (camConfig.enabledServices && camConfig.enabledServices.length > 0) {
-      return camConfig.enabledServices.includes(slug);
+      if (camConfig.enabledServices.includes(slug)) return true;
+      // Phone usage is a universal violation across all areas unless explicitly disabled
+      if (slug === 'phone_usage') return true;
+      return false;
     }
 
     // Role-based heuristics when no explicit services configured
     const role = camConfig.role;
-    const isKitchen = (role === 'kitchen') || (camera.zone_type === 'kitchen');
-    const isEntrance = (role === 'entrance') || (camera.zone_type === 'entrance');
+    const isKitchen = (role === 'kitchen') || (camera.zone_type === 'kitchen') || (camera.name && camera.name.includes('مطبخ'));
+    const isEntrance = (role === 'entrance') || (camera.zone_type === 'entrance') || (camera.name && camera.name.includes('مدخل'));
 
     if (slug === 'kitchen_ppe') return isKitchen;
     if (slug === 'visitor_counting') return isEntrance && !isKitchen;
@@ -393,10 +397,14 @@ class DetectionPipeline {
 
         if (isPhoneViolation && phoneBox) {
           track.consecutiveHits.phone = (track.consecutiveHits.phone || 0) + 1;
+          track.lastPhoneSeenTime = now;
           if (!track.firstCandidateTime.phone) track.firstCandidateTime.phone = now;
 
-          // Temporal stability: phone visible across at least 2 consecutive frames (> 1.5s)
-          if (track.consecutiveHits.phone >= 2 && (now - track.firstCandidateTime.phone >= 1500)) {
+          // Stable phone confirmation: at least 2 hits within 3 seconds, OR single high-confidence detection (>= 0.40)
+          const isConfirmed = (track.consecutiveHits.phone >= 2 && (now - track.firstCandidateTime.phone >= 800)) ||
+                              (phoneConfidence >= 0.40);
+
+          if (isConfirmed) {
             candidates.push({
               priority: 80,
               serviceSlug: 'phone_usage',
@@ -419,8 +427,11 @@ class DetectionPipeline {
             break;
           }
         } else {
-          track.consecutiveHits.phone = 0;
-          track.firstCandidateTime.phone = 0;
+          // Grace decay: only reset phone hits if not seen for over 3 seconds
+          if (now - (track.lastPhoneSeenTime || 0) > 3000) {
+            track.consecutiveHits.phone = 0;
+            track.firstCandidateTime.phone = 0;
+          }
         }
       }
     }
@@ -533,13 +544,19 @@ class DetectionPipeline {
     const lastPresenceCam = this.lastCameraAlerts.get(`${camera.id}_employee_monitoring`) || 0;
     const lastViolation = this.lastCameraViolation.get(camera.id) || 0;
 
+    // Intelligent Anti-Spam: Only alert if there is a NEW person who hasn't been alerted yet
+    const unalertedPersons = activeTracks.filter(t => !t.presenceAlerted);
+
     if (
       this.isServiceAllowed('employee_monitoring', camConfig, camera) &&
       candidates.length === 0 &&
       (now - lastViolation >= 120000) &&
       (now - lastPresenceCam >= cooldownMs) &&
-      activeTracks.length > 0
+      unalertedPersons.length > 0
     ) {
+      // Mark all current active tracks as presenceAlerted so they won't repeat
+      activeTracks.forEach(t => { t.presenceAlerted = true; });
+
       const isMultiple = activeTracks.length > 1;
       const richBoxes = activeTracks.map((t, idx) => this.toPercentBox(
         t.box,
@@ -559,6 +576,7 @@ class DetectionPipeline {
         boundingBoxes: richBoxes,
         metadata: {
           persons_count: activeTracks.length,
+          new_persons_count: unalertedPersons.length,
           service: 'presence',
         }
       });

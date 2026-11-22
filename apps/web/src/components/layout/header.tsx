@@ -96,7 +96,7 @@ export function Header({ onToggleMobileNav }: HeaderProps) {
     async function startSSE() {
       try {
         const token = await getValidToken();
-        const response = await fetch('http://localhost:8080/api/v1/events/stream', {
+        const response = await fetch('/api/v1/events/stream', {
           headers: {
             'Authorization': `Bearer ${token}`
           },

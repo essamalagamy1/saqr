@@ -301,8 +301,16 @@
             <small class="form-hint">عند تغيير السيرفر أو عنوان الـ IP يمكنك تحديثه هنا فوراً دون الحاجة لإعادة التثبيت.</small>
           </div>
           <div class="form-group" style="margin-top: 14px;">
-            <label for="settingsEmail">الحساب المرتبط حالياً</label>
-            <input type="email" id="settingsEmail" dir="ltr" disabled>
+            <label for="settingsEmail">الحساب المرتبط حالياً (البريد الإلكتروني)</label>
+            <input type="email" id="settingsEmail" dir="ltr" placeholder="fitforless@rased.com">
+          </div>
+          <div class="form-group" style="margin-top: 14px;">
+            <label for="settingsPassword">كلمة المرور لتجديد الجلسة أو الربط</label>
+            <div class="input-row">
+              <input type="password" id="settingsPassword" dir="ltr" placeholder="أدخل كلمة المرور لتسجيل الدخول">
+              <button class="btn btn-secondary" id="btnRelogin" onclick="reloginAccount()" style="white-space: nowrap;">تسجيل الدخول / تجديد الجلسة</button>
+            </div>
+            <small class="form-hint">عند تغيير رابط السيرفر أو انتهاء صلاحية الجلسة، سجّل الدخول هنا لتجديد الربط دون فقدان الكاميرات المحلية.</small>
           </div>
         </div>
 

@@ -294,15 +294,15 @@ VALUES (
 
 | الحزمة | الرابط المباشر على السيرفر | الوصف | الحجم |
 | :--- | :--- | :--- | :--- |
-| **الحزمة الكاملة (Full Win64 Package)** | `https://saqr.yourdomain.com/downloads/Saqr-Edge-Agent-Win64.zip` | تطبيق كامل ومدمج به محرك FFmpeg ونموذج YOLOX | ~195MB |
-| **تحديث الكود السريع (Quick App Update)** | `https://saqr.yourdomain.com/downloads/app.asar` | ملف التحديث البرمجي السريع (يُوضع داخل مجلد `resources`) | ~16MB |
+| **الحزمة الكاملة (Full Win64 Package)** | `https://saqr.yourdomain.com/downloads/Saqr-Edge-Agent-Win64.zip` | تطبيق كامل ومدمج به محرك FFmpeg ونموذج YOLOX | ~250MB |
+| **تحديث الكود السريع (Quick App Update)** | `https://saqr.yourdomain.com/downloads/app.asar` | ملف التحديث البرمجي السريع (يُوضع داخل مجلد `resources`) | ~78MB |
 | **معلومات الإصدار (Version Info)** | `https://saqr.yourdomain.com/downloads/version.json` | ملف التحقق التلقائي من الإصدارات والتحديثات الحية | <1KB |
 
 > 🔗 **رابط التحميل المباشر للنسخة الكاملة الحالية (ZIP):**  
-> [تحميل تطبيق Saqr Edge Agent للويندوز (Win64 ZIP)](https://accessed-undergraduate-balloon-litigation.trycloudflare.com/downloads/Saqr-Edge-Agent-Win64.zip)
+> [تحميل تطبيق Saqr Edge Agent للويندوز (Win64 ZIP)](https://weight-kenneth-engage-curious.trycloudflare.com/downloads/Saqr-Edge-Agent-Win64.zip)
 >
-> ⚡ **رابط التحديث السريع (ملف app.asar - 16MB فقط):**  
-> [تحميل ملف التحديث السريع app.asar](https://accessed-undergraduate-balloon-litigation.trycloudflare.com/downloads/app.asar)
+> ⚡ **رابط التحديث السريع (ملف app.asar - 78MB فقط):**  
+> [تحميل ملف التحديث السريع app.asar](https://weight-kenneth-engage-curious.trycloudflare.com/downloads/app.asar)
 
 ---
 

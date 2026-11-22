@@ -151,14 +151,15 @@ class CameraWorker {
     return new Promise((resolve, reject) => {
       const ffmpegExe = resolveFfmpegPath();
       const args = [
-        // 1. Force reliable TCP transport with 5-second socket timeout
+        '-hide_banner',
+        // 1. Force reliable TCP transport with 8-second socket timeout
         '-rtsp_transport', 'tcp',
-        '-stimeout', '5000000',
+        '-stimeout', '8000000',
         // 2. Discard corrupted network packets
         '-fflags', '+discardcorrupt',
-        // 3. Fast buffer analysis for low latency and minimal RAM usage
-        '-analyzeduration', '1000000',
-        '-probesize', '2000000',
+        // 3. Buffer analysis allowing reliable keyframe and SPS/PPS detection (4s / 8MB)
+        '-analyzeduration', '4000000',
+        '-probesize', '8000000',
         '-i', rtspUrl,
       ];
 
@@ -167,9 +168,9 @@ class CameraWorker {
         args.push('-ss', '00:00:01');
       }
 
-      // Filter: select only complete I-frames (keyframes) and limit max resolution to 1080p
+      // Filter: limit max resolution to 1080p for efficiency and capture 1 frame
       args.push(
-        '-vf', "select='eq(pict_type\\,I)',scale='min(1920,iw)':-2",
+        '-vf', "scale='min(1920,iw)':-2",
         '-frames:v', '1',
         '-vsync', 'vfr',
         '-q:v', '3',
@@ -215,7 +216,12 @@ class CameraWorker {
             reject(new Error(`إطار غير مكتمل أو تالف — حجم صغير جداً (${buffer.length} bytes)`));
           }
         } else {
-          reject(new Error(`توقف محرك الفيديو بكود (${code}): ${stderr.slice(-200)}`));
+          // Clean banner lines from stderr to keep relevant diagnostic details
+          const cleanStderr = stderr.split('\n')
+            .filter(line => !line.includes('configuration:') && !line.includes('libav') && !line.includes('built with'))
+            .join(' ')
+            .trim();
+          reject(new Error(`توقف محرك الفيديو بكود (${code}): ${cleanStderr.slice(-400) || stderr.slice(-400)}`));
         }
       });
 
@@ -285,9 +291,10 @@ class CameraWorker {
       currentPath,
       `/Streaming/Channels/${ch}01`,
       `/Streaming/Channels/${ch}02`,
+      `/cam/realmonitor?channel=${ch}&subtype=0`,
+      `/cam/realmonitor?channel=${ch}&subtype=1`,
       `/ch${ch}/main`,
       `/h264/ch${ch}/main/av_stream`,
-      `/cam/realmonitor?channel=${ch}&subtype=0`,
       `/live/ch${ch}`,
     ];
 
@@ -297,7 +304,10 @@ class CameraWorker {
     }
     const uniquePaths = [...new Set(testPaths)];
 
+    let primaryErr = null;
     let lastErr = null;
+    let testedCount = 0;
+
     for (const p of uniquePaths) {
       const candidateUrl = baseOrigin + p;
       try {
@@ -310,7 +320,11 @@ class CameraWorker {
           workingUrl: candidateUrl
         };
       } catch (err) {
+        if (testedCount === 0) {
+          primaryErr = err;
+        }
         lastErr = err;
+        testedCount++;
         const msg = err.message || '';
         // Only break early if credentials wrong (401) or network completely unreachable
         if (msg.includes('401') || msg.includes('Unauthorized') || msg.includes('No route') || msg.includes('Connection refused')) {
@@ -319,17 +333,27 @@ class CameraWorker {
       }
     }
 
-    let errMsg = lastErr ? lastErr.message : 'فشل الاتصال بالكاميرا';
-    if (errMsg.includes('404 Not Found') || errMsg.includes('DESCRIBE failed')) {
-      errMsg = 'تم الاتصال بالكاميرا ولكن تم رفض مسار البث (404 Not Found).\n' +
-        'لكاميرات ومسجلات Hikvision/EZVIZ: مسار البث القياسي هو /Streaming/Channels/101 (أو 201 للقناة 2).\n' +
-        'لكاميرات EZVIZ: تأكد من تفعيل RTSP وإيقاف "تشفير الفيديو" من تطبيق EZVIZ على الهاتف.';
-    } else if (errMsg.includes('401') || errMsg.includes('Unauthorized')) {
+    const errToCheck = primaryErr || lastErr;
+    let rawMsg = errToCheck ? errToCheck.message : 'فشل الاتصال بالكاميرا';
+    let errMsg = rawMsg;
+
+    if (rawMsg.includes('401') || rawMsg.includes('Unauthorized')) {
       errMsg = 'فشل المصادقة (401 Unauthorized): كود التحقق (Verification Code) أو كلمة المرور غير صحيحة.\n' +
-        'يرجى التأكد من كلمة المرور أو كود التحقق المكون من 6 أحرف إنجليزية كبيرة والمكتوب أسفل الكاميرا.';
-    } else if (errMsg.includes('Connection refused') || errMsg.includes('timed out') || errMsg.includes('No route')) {
+        '• تأكد من اسم المستخدم (غالباً admin) وباسوورد الكاميرا أو كود التحقق المكون من 6 أحرف كبيرة.';
+    } else if (rawMsg.includes('404 Not Found') || rawMsg.includes('DESCRIBE failed')) {
+      errMsg = `تم الاتصال بجهاز التسجيل ولكن مسار القناة ${ch} غير موجود (404 Not Found).\n` +
+        `• تأكد أن كاميرا القناة ${ch} موصلة وتعمل فعلياً على شاشة الـ DVR/NVR.\n` +
+        `• لمسجلات Hikvision: جرب المسار الثانوي /Streaming/Channels/${ch}02\n` +
+        `• لمسجلات Dahua: جرب المسار /cam/realmonitor?channel=${ch}&subtype=1`;
+    } else if (rawMsg.includes('Connection refused') || rawMsg.includes('timed out') || rawMsg.includes('No route') || rawMsg.includes('10060') || rawMsg.includes('10061')) {
       errMsg = 'تعذر الوصول لعنوان الكاميرا (Connection Refused/Timeout).\n' +
-        'يرجى التأكد من تشغيل الكاميرا واتصالها بنفس شبكة الواي فاي وصحة عنوان الـ IP والمنفذ 554.';
+        '• تأكد من تشغيل الكاميرا/الـ DVR واتصاله بالشبكة المحلية.\n' +
+        '• تأكد من صحة عنوان IP والمنفذ 554 على جهاز التسجيل.';
+    } else if (rawMsg.includes('Invalid data found') || rawMsg.includes('bad parameter') || rawMsg.includes('Protocol not supported')) {
+      errMsg = `تعذر فك تشفير بث الفيديو من القناة ${ch} (Invalid data found).\n` +
+        `• 1. القناة ${ch} قد تكون شاغرة أو الكاميرا مفصولة عن المسجل.\n` +
+        `• 2. ترميز الكاميرا مضبوط على H.265+ (Smart Codec) — قم بتحويله من إعدادات الـ DVR إلى H.264 العادي.\n` +
+        `• 3. جرب استخدام البث الفرعي (Sub-stream) الأكثر استقراراً: /Streaming/Channels/${ch}02 (Hikvision) أو /cam/realmonitor?channel=${ch}&subtype=1 (Dahua).`;
     }
 
     throw new Error(errMsg);
@@ -370,12 +394,13 @@ class CameraWorker {
 
       const ffmpegExe = resolveFfmpegPath();
       const args = [
+        '-hide_banner',
         '-rtsp_transport', 'tcp',
-        '-stimeout', '6000000', // 6s socket timeout
+        '-stimeout', '8000000', // 8s socket timeout
         '-fflags', '+discardcorrupt+nobuffer',
         '-flags', 'low_delay',
-        '-analyzeduration', '1000000',
-        '-probesize', '1000000',
+        '-analyzeduration', '2500000',
+        '-probesize', '3000000',
         '-i', rtspUrl,
         '-vf', `fps=${targetFps},scale='min(1280,iw)':-2`,
         '-q:v', '3',

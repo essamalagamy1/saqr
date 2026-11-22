@@ -308,7 +308,10 @@ class AIEngine {
       }
 
       const finalScore = objConf * bestClassScore;
-      if (finalScore < this.confThreshold) continue;
+      const classLabel = this.classes[bestClassId] || '';
+      // Calibrated threshold: allow small objects like cell phone (classId 67) at lower threshold in CCTV
+      const targetThreshold = (classLabel === 'cell phone' || bestClassId === 67) ? 0.20 : this.confThreshold;
+      if (finalScore < targetThreshold) continue;
 
       const gx = grids[i * 2];
       const gy = grids[i * 2 + 1];

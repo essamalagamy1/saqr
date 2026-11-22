@@ -233,8 +233,8 @@ export default function CamerasPage() {
     setLoading(true);
     try {
       const [camsData, branchesData] = await Promise.all([
-        api.get<CameraItem[]>('/cameras/'),
-        api.get<BranchItem[]>('/branches/'),
+        api.get<CameraItem[]>('/cameras'),
+        api.get<BranchItem[]>('/branches'),
       ]);
 
       if (camsData) setCameras(camsData);
@@ -275,7 +275,7 @@ export default function CamerasPage() {
           const branchId = branches[0]?.id || '';
           for (const c of localData.cameras) {
             const channelStr = c.channel ? `CH${c.channel}` : (c.dvrChannel || 'CH1');
-            await api.post('/cameras/', {
+            await api.post('/cameras', {
               name: c.name,
               branch_id: branchId,
               rtsp_url: c.rtspUrl,
@@ -292,7 +292,7 @@ export default function CamerasPage() {
 
     // 2. Fetch latest cameras from cloud database
     try {
-      const camsData = await api.get<CameraItem[]>('/cameras/');
+      const camsData = await api.get<CameraItem[]>('/cameras');
       if (camsData) {
         setCameras(camsData);
         if (camsData.length > 0) {

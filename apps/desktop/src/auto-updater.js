@@ -144,7 +144,10 @@ class AutoUpdater {
         const batContent = `@echo off
 chcp 65001 >nul
 echo [Saqr Edge Agent] Updating application to latest version...
-timeout /t 2 /nobreak >nul
+timeout /t 1 /nobreak >nul
+taskkill /f /im "saqr-edge-agent.exe" >nul 2>&1
+taskkill /f /im "Saqr Edge Agent.exe" >nul 2>&1
+timeout /t 1 /nobreak >nul
 
 copy /y "${tempUpdatePath}" "${liveAsarPath}" >nul
 if errorlevel 1 (

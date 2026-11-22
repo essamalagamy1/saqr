@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  skipTrailingSlashRedirect: true,
   images: {
     unoptimized: true,
   },
@@ -14,6 +15,15 @@ const nextConfig = {
           { key: 'X-XSS-Protection', value: '1; mode=block' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
         ],
+      },
+    ];
+  },
+  async redirects() {
+    return [
+      {
+        source: '/downloads/Saqr-Edge-Agent-Win64',
+        destination: '/downloads/Saqr-Edge-Agent-Win64.zip',
+        permanent: false,
       },
     ];
   },

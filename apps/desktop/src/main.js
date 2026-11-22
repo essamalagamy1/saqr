@@ -487,9 +487,10 @@ ipcMain.handle('dvr:connect-and-fetch', async (_, config) => {
 // Bulk sync all local cameras to cloud API
 ipcMain.handle('cameras:syncAllToCloud', async () => {
   const serverUrl = store.get('serverUrl');
-  const token = store.get('accessToken');
+  let token = store.get('accessToken');
+  const refreshToken = store.get('refreshToken');
   if (!serverUrl || !token) {
-    return { success: false, error: 'غير متصل بالخادم أو لم يتم تسجيل الدخول' };
+    return { success: false, error: 'غير متصل بالخادم أو لم يتم تسجيل الدخول. يرجى ضبط الرابط وتسجيل الدخول من إعدادات الخادم.' };
   }
 
   const ApiClient = require('./api-client');
@@ -500,61 +501,85 @@ ipcMain.handle('cameras:syncAllToCloud', async () => {
     return { success: true, count: 0, message: 'لا توجد كاميرات محلية للمزامنة' };
   }
 
-  // Check server state first: if cameras were deleted from server, do not resurrect them!
-  try {
-    const serverCams = await client.getCameras();
-    if (Array.isArray(serverCams)) {
-      if (serverCams.length === 0 && localCameras.some(c => c.id && c.id.length > 20)) {
-        // All cameras were deleted on cloud platform
-        console.log('[SYNC] Server cameras were cleared. Synchronizing local store to match server...');
-        store.set('cameras', []);
-        reloadAgentIfRunning();
-        return { success: true, count: 0, message: 'تمت مزامنة الحذف مع المنصة' };
-      }
-
-      if (serverCams.length > 0) {
-        const serverIdSet = new Set(serverCams.map(s => s.id));
-        const serverCamMap = new Map(serverCams.map(s => [s.id, s]));
-
-        // Prune cameras that have a server ID that no longer exists on server (were deleted)
-        localCameras = localCameras.filter(c => !c.id || c.id.length < 20 || serverIdSet.has(c.id));
-
-        // Merge latest cloud configuration (roles, enabled services, zones) into local cameras
-        localCameras = localCameras.map(cam => {
-          const remote = serverCamMap.get(cam.id);
-          if (!remote) return cam;
-          return {
-            ...cam,
-            config: remote.config ?? cam.config,
-            zone_type: remote.zone_type ?? cam.zone_type,
-            zone_name: remote.zone_name ?? cam.zone_name,
-            branch_id: remote.branch_id ?? cam.branch_id,
-          };
-        });
-
-        store.set('cameras', localCameras);
-      }
-    }
-  } catch (err) {
-    console.warn('[SYNC] Could not check server cameras state:', err.message);
-  }
-
   let syncedCount = 0;
+  let lastError = '';
   for (const cam of localCameras) {
     try {
       const serverCam = await client.addCamera(cam);
-      if (serverCam && serverCam.id && serverCam.id !== cam.id) {
+      if (serverCam && serverCam.id) {
         cam.id = serverCam.id;
+        cam.branch_id = serverCam.branch_id || cam.branch_id;
       }
       syncedCount++;
     } catch (err) {
-      console.warn(`[SYNC] Failed to sync camera ${cam.name}:`, err.message);
+      lastError = err.message || String(err);
+      console.warn(`[SYNC] Failed to sync camera ${cam.name}:`, lastError);
+
+      // If 401 Unauthorized, attempt automatic token refresh
+      if ((lastError.includes('401') || lastError.toLowerCase().includes('token')) && refreshToken) {
+        try {
+          const refreshed = await client.refreshToken(refreshToken);
+          if (refreshed && refreshed.accessToken) {
+            token = refreshed.accessToken;
+            store.set('accessToken', token);
+            client.accessToken = token;
+
+            // Retry syncing this camera
+            const serverCam = await client.addCamera(cam);
+            if (serverCam && serverCam.id) {
+              cam.id = serverCam.id;
+              cam.branch_id = serverCam.branch_id || cam.branch_id;
+            }
+            syncedCount++;
+            lastError = '';
+          }
+        } catch (refreshErr) {
+          console.warn('[SYNC] Auto-refresh failed:', refreshErr.message);
+        }
+      }
     }
+  }
+
+  if (syncedCount === 0 && localCameras.length > 0) {
+    return {
+      success: false,
+      count: 0,
+      total: localCameras.length,
+      error: `فشلت مزامنة الكاميرات مع المنصة: ${lastError || 'تعذر الاتصال بالخادم'}. تأكد من صحة رابط الخادم وحالة تسجيل الدخول.`
+    };
+  }
+
+  // After pushing local cameras, merge remote configurations (roles, zones, etc.) from server
+  try {
+    const serverCams = await client.getCameras();
+    if (Array.isArray(serverCams) && serverCams.length > 0) {
+      const serverCamMap = new Map(serverCams.map(s => [s.id, s]));
+      localCameras = localCameras.map(cam => {
+        const remote = serverCamMap.get(cam.id);
+        if (!remote) return cam;
+        return {
+          ...cam,
+          config: remote.config ?? cam.config,
+          zone_type: remote.zone_type ?? cam.zone_type,
+          zone_name: remote.zone_name ?? cam.zone_name,
+          branch_id: remote.branch_id ?? cam.branch_id,
+        };
+      });
+    }
+  } catch (err) {
+    console.warn('[SYNC] Post-sync camera config merge warning:', err.message);
   }
 
   store.set('cameras', localCameras);
   reloadAgentIfRunning();
-  return { success: true, count: syncedCount, total: localCameras.length };
+  return {
+    success: true,
+    count: syncedCount,
+    total: localCameras.length,
+    message: syncedCount === localCameras.length
+      ? `تمت مزامنة جميع الكاميرات (${syncedCount} كاميرا) مع المنصة بنجاح!`
+      : `تمت مزامنة ${syncedCount} من إجمالي ${localCameras.length} كاميرا مع المنصة.`
+  };
 });
 
 // Local HTTP API on port 18800 for Web Dashboard direct sync

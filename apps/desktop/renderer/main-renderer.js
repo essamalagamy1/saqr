@@ -486,15 +486,28 @@ async function fetchServerCameras(silent = false) {
 }
 
 async function syncAllCamerasToCloud() {
+  const syncBtn = document.querySelector('[onclick="syncAllCamerasToCloud()"]');
+  const originalHtml = syncBtn ? syncBtn.innerHTML : '';
+  if (syncBtn) {
+    syncBtn.innerHTML = '<span>⏳ جاري المزامنة...</span>';
+    syncBtn.style.pointerEvents = 'none';
+  }
+
   try {
     const res = await rased.cameras.syncAllToCloud();
-    if (res.success) {
-      alert(`تمت مزامنة الكاميرات مع المنصة بنجاح! (${res.count} كاميرا تمت مزامنتها مع السيرفر).`);
+    if (res && res.success) {
+      alert(res.message || `تمت مزامنة الكاميرات مع المنصة بنجاح! (${res.count} كاميرا تمت مزامنتها مع السيرفر).`);
+      loadCameras();
     } else {
-      alert(res.error || 'فشلت المزامنة مع الخادم. تأكد من صحة إعدادات الخادم وتسجيل الدخول.');
+      alert(res?.error || 'فشلت المزامنة مع الخادم. تأكد من صحة إعدادات الخادم وتسجيل الدخول.');
     }
   } catch (err) {
     alert('تعذر المزامنة: ' + err.message);
+  } finally {
+    if (syncBtn) {
+      syncBtn.innerHTML = originalHtml;
+      syncBtn.style.pointerEvents = 'auto';
+    }
   }
 }
 
@@ -522,6 +535,38 @@ async function saveServerUrl() {
   await rased.config.set('serverUrl', url);
   document.getElementById('settingsServerUrl').value = url;
   alert('تم تحديث وحفظ رابط الخادم بنجاح. ستتصل كافة الطلبات بهذا الرابط الجديد.');
+}
+
+async function reloginAccount() {
+  const serverUrl = document.getElementById('settingsServerUrl').value.trim();
+  const email = document.getElementById('settingsEmail').value.trim();
+  const password = document.getElementById('settingsPassword').value;
+
+  if (!serverUrl) { alert('يرجى إدخال عنوان الخادم أو الدومين'); return; }
+  if (!email || !password) { alert('يرجى إدخال البريد الإلكتروني وكلمة المرور'); return; }
+
+  const btn = document.getElementById('btnRelogin');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري تسجيل الدخول...'; }
+
+  try {
+    const res = await rased.connection.test(serverUrl, email, password);
+    if (res && res.success && res.data) {
+      await rased.config.set('serverUrl', serverUrl);
+      await rased.config.set('email', email);
+      await rased.config.set('accessToken', res.data.accessToken);
+      if (res.data.refreshToken) await rased.config.set('refreshToken', res.data.refreshToken);
+      if (res.data.companyId) await rased.config.set('companyId', res.data.companyId);
+
+      alert('✅ تم تسجيل الدخول وتحديث بيانات الربط بنجاح! يمكنك الآن مزامنة الكاميرات مع المنصة.');
+      document.getElementById('settingsPassword').value = '';
+    } else {
+      alert('❌ فشل تسجيل الدخول: ' + (res?.error || 'بيانات الدخول غير صحيحة'));
+    }
+  } catch (err) {
+    alert('❌ تعذر الاتصال بالخادم: ' + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'تسجيل الدخول / تجديد الجلسة'; }
+  }
 }
 
 async function resetSetup() {
@@ -950,10 +995,10 @@ async function showDvrModal() {
       if (res && res.success && res.data && res.data.length > 0) {
         branchSelect.innerHTML = res.data.map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('');
       } else {
-        branchSelect.innerHTML = '<option value="default">الفرع الرئيسي</option>';
+        branchSelect.innerHTML = '<option value="">الفرع الرئيسي (تلقائي)</option>';
       }
     } catch {
-      branchSelect.innerHTML = '<option value="default">الفرع الرئيسي</option>';
+      branchSelect.innerHTML = '<option value="">الفرع الرئيسي (تلقائي)</option>';
     }
   }
 }

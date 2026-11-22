@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api/v1';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api/v1';
 
 export async function loginDefaultUser(): Promise<string> {
   try {
@@ -40,6 +40,11 @@ export async function getValidToken(): Promise<string> {
 export async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   let token = await getValidToken();
 
+  let cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  if (cleanEndpoint.length > 1) {
+    cleanEndpoint = cleanEndpoint.replace(/\/+$/, '');
+  }
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
@@ -49,7 +54,7 @@ export async function fetchApi<T>(endpoint: string, options: RequestInit = {}): 
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  let res = await fetch(`${API_BASE}${endpoint}`, {
+  let res = await fetch(`${API_BASE}${cleanEndpoint}`, {
     ...options,
     headers,
   });
@@ -59,7 +64,7 @@ export async function fetchApi<T>(endpoint: string, options: RequestInit = {}): 
     token = await loginDefaultUser();
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
-      res = await fetch(`${API_BASE}${endpoint}`, {
+      res = await fetch(`${API_BASE}${cleanEndpoint}`, {
         ...options,
         headers,
       });

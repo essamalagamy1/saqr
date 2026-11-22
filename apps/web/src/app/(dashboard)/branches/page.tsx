@@ -19,7 +19,7 @@ export default function BranchesPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const [newBranch, setNewBranch] = useState({ name: '', city: 'القاهرة', address: '' });
+  const [newBranch, setNewBranch] = useState({ name: '' });
 
   const loadBranches = async () => {
     setLoading(true);
@@ -40,14 +40,14 @@ export default function BranchesPage() {
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newBranch.name) return;
+    if (!newBranch.name.trim()) return;
     setSubmitting(true);
     setError('');
 
     try {
-      await api.post('/branches/', newBranch);
+      await api.post('/branches/', { name: newBranch.name.trim() });
       setShowAddModal(false);
-      setNewBranch({ name: '', city: 'القاهرة', address: '' });
+      setNewBranch({ name: '' });
       await loadBranches();
     } catch (e: any) {
       setError(e.message || 'حدث خطأ أثناء إضافة الفرع');
@@ -128,7 +128,7 @@ export default function BranchesPage() {
                     <h3 className="text-base font-bold text-white">{b.name}</h3>
                     <div className="mt-1 flex items-center gap-1.5 text-xs text-slate-400">
                       <MapPin className="h-3.5 w-3.5 text-amber-500" />
-                      <span>{b.city} — {b.address || 'العنوان الرئيسي'}</span>
+                      <span>{b.city ? `${b.city}${b.address ? ' — ' + b.address : ''}` : (b.address || 'الفرع الرئيسي')}</span>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -162,43 +162,17 @@ export default function BranchesPage() {
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-[#0d1527] p-6 shadow-2xl">
-            <h2 className="text-lg font-bold text-white mb-4">إضافة فرع جديد للشركة</h2>
+            <h2 className="text-lg font-bold text-white mb-4">إضافة فرع جديد</h2>
             <form onSubmit={handleAdd} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">اسم الفرع</label>
                 <input
                   type="text"
                   required
-                  placeholder="مثال: فرع الشيخ زايد"
+                  autoFocus
+                  placeholder="مثال: فرع الشيخ زايد أو الفرع الرئيسي"
                   value={newBranch.name}
-                  onChange={(e) => setNewBranch({ ...newBranch, name: e.target.value })}
-                  className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-amber-500 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">المدينة</label>
-                <select
-                  value={newBranch.city}
-                  onChange={(e) => setNewBranch({ ...newBranch, city: e.target.value })}
-                  className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
-                >
-                  <option value="القاهرة">القاهرة</option>
-                  <option value="الجيزة">الجيزة</option>
-                  <option value="الإسكندرية">الإسكندرية</option>
-                  <option value="الرياض">الرياض</option>
-                  <option value="جدة">جدة</option>
-                  <option value="دبي">دبي</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">العنوان التفصيلي</label>
-                <input
-                  type="text"
-                  placeholder="الشارع أو المنطقة"
-                  value={newBranch.address}
-                  onChange={(e) => setNewBranch({ ...newBranch, address: e.target.value })}
+                  onChange={(e) => setNewBranch({ name: e.target.value })}
                   className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-amber-500 focus:outline-none"
                 />
               </div>

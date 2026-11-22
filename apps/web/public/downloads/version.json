@@ -1,15 +1,15 @@
 {
-  "version": "1.3.21",
+  "version": "1.3.23",
   "name": "Saqr Edge Agent",
-  "releaseDate": "2026-11-21",
+  "releaseDate": "2026-11-22",
   "asarUrl": "/downloads/app.asar",
   "zipUrl": "/downloads/Saqr-Edge-Agent-Win64.zip",
   "changelog": [
-    "تدفق فيديو دائم ومستمر عبر FFmpeg Persistent MJPEG Pipeline بمعدل 2 FPS لتقليل استهلاك المعالج وتفادي تقطعات التتبع",
-    "دمج مصنف ذكاء اصطناعي حقيقي MobileNetV2 ONNX مخصص لرصد كمامات الوجه ومهمات الوقاية PPE بدقة 98% وإلغاء فحص ألوان البيكسلات",
-    "توحيد محرك الرصد والتتبع الزمني ByteTrack بالكامل على جهاز العميل مع تسريع DirectML GPU وإلغاء الازدواجية مع السيرفر",
-    "معايرة عتبة الثقة (confThreshold: 0.30) لمنع الإنذارات الكاذبة للأجسام والظلال ورصد الجوال باشتراط الثبات الحركي",
-    "قراءة إعدادات الكاميرات وخطوط العد وفترات الصمت ديناميكياً بالكامل من قاعدة البيانات وإلغاء أي قيم ثابتة"
+    "منع تكرار تنبيهات تواجد الأفراد على نفس الشخص طالما متواجد في الكادر",
+    "تفعيل ومضاعفة حساسية رصد الهواتف المحمولة وتغطية مكالمات الأذن واليدين",
+    "تفعيل خدمة كشف الجوال افتراضياً على كافة الكاميرات والزوايا",
+    "تحسين رصد الكمامات الطبية ومهمات الوقاية في الإضاءة المتفاوتة",
+    "مزامنة دورية تلقائية لإعدادات الكاميرات والذكاء الاصطناعي مع المنصة"
   ],
-  "releaseNotes": "v1.3.21: Persistent MJPEG Pipeline, True MobileNetV2 PPE Classification, Edge DirectML Consolidation & Calibrated Surveillance"
+  "releaseNotes": "v1.3.23: Anti-Spam Presence Tracking, High-Sensitivity Mobile Phone & Mask Detection"
 }

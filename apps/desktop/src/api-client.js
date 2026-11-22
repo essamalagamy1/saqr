@@ -80,8 +80,33 @@ class ApiClient {
     };
   }
 
+  async refreshToken(refreshToken) {
+    const url = `${this.baseUrl}/auth/refresh`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || body.message || `Refresh failed (${res.status})`);
+    }
+
+    const data = await res.json();
+    const newAccessToken = data.data?.access_token || data.data?.tokens?.access_token;
+    const newRefreshToken = data.data?.refresh_token || data.data?.tokens?.refresh_token || refreshToken;
+    if (newAccessToken) {
+      this.accessToken = newAccessToken;
+    }
+    return {
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken,
+    };
+  }
+
   async getCameras() {
-    const res = await fetch(`${this.baseUrl}/cameras/`, {
+    const res = await fetch(`${this.baseUrl}/cameras`, {
       headers: this.headers,
     });
     if (!res.ok) throw new Error(`Failed to fetch cameras (${res.status})`);
@@ -90,7 +115,7 @@ class ApiClient {
   }
 
   async getBranches() {
-    const res = await fetch(`${this.baseUrl}/branches/`, {
+    const res = await fetch(`${this.baseUrl}/branches`, {
       headers: this.headers,
     });
     if (!res.ok) throw new Error(`Failed to fetch branches (${res.status})`);
@@ -113,9 +138,14 @@ class ApiClient {
       dvrChannel = `CH${parseInt(chMatch[1], 10)}`;
     }
 
+    let rawBranch = camera.branchId || camera.branch_id || '';
+    if (rawBranch === 'default' || rawBranch === 'undefined' || rawBranch === 'null' || rawBranch.length < 30) {
+      rawBranch = '';
+    }
+
     const payload = {
       name: camera.name,
-      branch_id: camera.branchId || camera.branch_id || '',
+      branch_id: rawBranch,
       rtsp_url: rtsp,
       dvr_ip: dvrIp,
       dvr_channel: dvrChannel,
@@ -123,7 +153,7 @@ class ApiClient {
       status: camera.enabled !== false ? 'active' : 'disconnected',
     };
 
-    const res = await fetch(`${this.baseUrl}/cameras/`, {
+    const res = await fetch(`${this.baseUrl}/cameras`, {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify(payload),
