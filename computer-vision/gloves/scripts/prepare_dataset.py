@@ -97,36 +97,47 @@ def parse_voc_xml(xml_file: Path, img_w: int = None, img_h: int = None):
 
     return boxes
 
-def collect_source_pairs(source_dirs):
+def collect_source_pairs():
     """Collect all valid image and label/xml pairs from candidate directories."""
     pairs = []
-    for sdir in source_dirs:
-        p = Path(sdir)
-        if not p.exists():
-            continue
-        for img_p in sorted(list(p.rglob("*.jpg")) + list(p.rglob("*.png")) + list(p.rglob("*.jpeg"))):
+    cache_base = Path.home() / ".cache" / "kagglehub" / "datasets"
+
+    # 1. Gloves dataset
+    gloves_dir = cache_base / "dataclusterlabs" / "gloves-dataset-covid-safety-wear" / "versions" / "2"
+    if gloves_dir.exists():
+        for img_p in gloves_dir.glob("*.jpg"):
+            xml_p = gloves_dir / "Annotations" / "Annotations" / f"{img_p.stem}.xml"
+            if xml_p.exists():
+                pairs.append((img_p, "xml", xml_p))
+
+    # 2. Palm (bare hand) dataset
+    palm_dir = cache_base / "dataclusterlabs" / "palm-and-gloves-dataset" / "versions" / "4" / "palm_100"
+    if palm_dir.exists():
+        for img_p in palm_dir.glob("*.jpg"):
+            xml_p = palm_dir / f"{img_p.stem}.xml"
+            if xml_p.exists():
+                pairs.append((img_p, "xml", xml_p))
+
+    # 3. Local raw directory if present
+    raw_dir = PROJECT_DIR / "dataset" / "raw"
+    if raw_dir.exists():
+        for img_p in sorted(list(raw_dir.rglob("*.jpg")) + list(raw_dir.rglob("*.png"))):
             xml_p = img_p.with_suffix(".xml")
             txt_p = img_p.with_suffix(".txt")
             if xml_p.exists():
                 pairs.append((img_p, "xml", xml_p))
             elif txt_p.exists():
                 pairs.append((img_p, "txt", txt_p))
+
     return pairs
 
 def prepare_dataset(target_dir: Path, seed: int = 42):
     """
     Validates, standardizes, and splits gloves & bare hand dataset into 70/20/10.
     """
-    cache_base = Path.home() / ".cache" / "kagglehub" / "datasets"
-    candidate_sources = [
-        cache_base / "dataclusterlabs" / "palm-and-gloves-dataset" / "versions" / "4",
-        cache_base / "dataclusterlabs" / "gloves-dataset-covid-safety-wear" / "versions" / "2",
-        PROJECT_DIR / "dataset" / "raw"
-    ]
-
-    all_pairs = collect_source_pairs(candidate_sources)
+    all_pairs = collect_source_pairs()
     if not all_pairs:
-        logger.error(f"No image/annotation pairs found in sources: {candidate_sources}")
+        logger.error("No image/annotation pairs found in sources.")
         return False
 
     logger.info(f"Discovered {len(all_pairs)} image/annotation pairs across gloves/hands sources.")
