@@ -82,32 +82,26 @@ def parse_voc_xml(xml_file: Path, img_w: int = None, img_h: int = None):
 
 def collect_source_pairs():
     pairs = []
-    cache_base = Path.home() / ".cache" / "kagglehub" / "datasets" / "dataclusterlabs" / "mobile-phone-image-dataset"
+    phone_base = Path.home() / ".cache" / "kagglehub" / "datasets" / "dataclusterlabs" / "mobile-phone-image-dataset" / "versions" / "2"
+    img_dir = phone_base / "Mobile_image" / "Mobile_image"
+    xml_dir = phone_base / "Annotations" / "Annotations"
 
-    # Search for candidate dataset dirs
-    candidate_dirs = list(cache_base.glob("versions/*")) if cache_base.exists() else []
-    candidate_dirs.append(PROJECT_DIR / "dataset" / "raw")
-
-    for cdir in candidate_dirs:
-        if not cdir.exists():
-            continue
-        for img_p in sorted(list(cdir.rglob("*.jpg")) + list(cdir.rglob("*.png"))):
-            xml_p = img_p.with_suffix(".xml")
-            if not xml_p.exists():
-                xml_cand = cdir / "Annotations" / "Annotations" / f"{img_p.stem}.xml"
-                if xml_cand.exists():
-                    xml_p = xml_cand
-                else:
-                    xml_cand2 = cdir / "Annotations" / f"{img_p.stem}.xml"
-                    if xml_cand2.exists():
-                        xml_p = xml_cand2
-
+    if img_dir.exists() and xml_dir.exists():
+        for img_p in img_dir.glob("*.jpg"):
+            xml_p = xml_dir / f"{img_p.stem}.xml"
             if xml_p.exists():
                 pairs.append((img_p, "xml", xml_p))
-            else:
-                txt_p = img_p.with_suffix(".txt")
-                if txt_p.exists():
-                    pairs.append((img_p, "txt", txt_p))
+
+    raw_dir = PROJECT_DIR / "dataset" / "raw"
+    if raw_dir.exists():
+        for img_p in sorted(list(raw_dir.rglob("*.jpg")) + list(raw_dir.rglob("*.png"))):
+            xml_p = img_p.with_suffix(".xml")
+            txt_p = img_p.with_suffix(".txt")
+            if xml_p.exists():
+                pairs.append((img_p, "xml", xml_p))
+            elif txt_p.exists():
+                pairs.append((img_p, "txt", txt_p))
+
     return pairs
 
 def prepare_dataset(target_dir: Path, seed: int = 42):

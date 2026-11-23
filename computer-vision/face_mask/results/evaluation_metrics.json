@@ -1,0 +1,39 @@
+{
+  "overall": {
+    "precision": 0.7237,
+    "recall": 0.7935,
+    "map50": 0.7975,
+    "map50_95": 0.5494,
+    "inference_latency_ms": 14.4,
+    "fps": 69.4
+  },
+  "per_class": [
+    {
+      "class_id": 0,
+      "name": "with_mask",
+      "ar_name": "\u0643\u0645\u0627\u0645\u0629 \u0635\u062d\u064a\u062d\u0629 (Compliant)",
+      "precision": 0.8994,
+      "recall": 0.9302,
+      "f1_score": 0.9145,
+      "map50_95": 0.6501
+    },
+    {
+      "class_id": 1,
+      "name": "without_mask",
+      "ar_name": "\u0628\u062f\u0648\u0646 \u0643\u0645\u0627\u0645\u0629 (No Mask)",
+      "precision": 0.775,
+      "recall": 0.8947,
+      "f1_score": 0.8306,
+      "map50_95": 0.5955
+    },
+    {
+      "class_id": 2,
+      "name": "mask_weared_incorrect",
+      "ar_name": "\u0627\u0631\u062a\u062f\u0627\u0621 \u062e\u0627\u0637\u0626 (Incorrect Mask)",
+      "precision": 0.4966,
+      "recall": 0.5556,
+      "f1_score": 0.5244,
+      "map50_95": 0.4026
+    }
+  ]
+}
