@@ -1,6 +1,6 @@
 {
   "name": "saqr-edge-agent",
-  "version": "1.3.23",
+  "version": "1.3.24",
   "description": "Saqr Edge Agent — AI-powered camera monitoring for Windows",
   "main": "src/main.js",
   "author": "Saqr",

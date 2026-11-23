@@ -145,17 +145,25 @@ class AutoUpdater {
 chcp 65001 >nul
 echo [Saqr Edge Agent] Updating application to latest version...
 timeout /t 1 /nobreak >nul
-taskkill /f /im "saqr-edge-agent.exe" >nul 2>&1
-taskkill /f /im "Saqr Edge Agent.exe" >nul 2>&1
-timeout /t 1 /nobreak >nul
+taskkill /f /t /im "saqr-edge-agent.exe" >nul 2>&1
+taskkill /f /t /im "Saqr Edge Agent.exe" >nul 2>&1
+timeout /t 2 /nobreak >nul
 
-copy /y "${tempUpdatePath}" "${liveAsarPath}" >nul
+set ATTEMPTS=0
+:retry_copy
+if exist "${liveAsarPath}.old" del /f /q "${liveAsarPath}.old" >nul 2>&1
+move /y "${liveAsarPath}" "${liveAsarPath}.old" >nul 2>&1
+copy /y "${tempUpdatePath}" "${liveAsarPath}" >nul 2>&1
 if errorlevel 1 (
-  timeout /t 2 /nobreak >nul
-  copy /y "${tempUpdatePath}" "${liveAsarPath}" >nul
+  set /a ATTEMPTS+=1
+  if %ATTEMPTS% leq 10 (
+    timeout /t 1 /nobreak >nul
+    goto retry_copy
+  )
 )
 
-del "${tempUpdatePath}" >nul 2>&1
+del /f /q "${tempUpdatePath}" >nul 2>&1
+del /f /q "${liveAsarPath}.old" >nul 2>&1
 start "" "${exePath}"
 (goto) 2>nul & del "%~f0"
 `;

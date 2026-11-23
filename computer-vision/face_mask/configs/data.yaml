@@ -1,0 +1,8 @@
+names:
+  0: with_mask
+  1: without_mask
+  2: mask_weared_incorrect
+path: /mnt/essam/sites/saqr/computer-vision/face_mask/dataset
+test: images/test
+train: images/train
+val: images/val

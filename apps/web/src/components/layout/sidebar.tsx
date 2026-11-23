@@ -67,6 +67,12 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           icon: BrainCircuit, 
           badge: counts.aiServices && counts.aiServices > 0 ? String(counts.aiServices) : undefined 
         },
+        {
+          label: 'مختبر فحص PPE الذكي',
+          href: '/ppe-test',
+          icon: ShieldCheck,
+          badge: 'جديد',
+        },
       ],
     },
     {
