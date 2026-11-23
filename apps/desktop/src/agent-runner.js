@@ -136,86 +136,82 @@ class AgentRunner {
         this.apiClient.uploadCameraFrame(camera.id, ip, ch, frameBuffer).catch(() => {});
       }
 
-      // 2. Run YOLOX Primary Object Detection
-      const detections = await this.aiEngine.detect(frameBuffer, camera.id);
+      // 2. Run Multi-Model Detection for active models on this camera
+      const activeModels = Array.isArray(camera.activeModels) && camera.activeModels.length > 0
+        ? camera.activeModels
+        : ['face_mask', 'gloves', 'phone'];
+
+      const { detections, frameWidth, frameHeight } = await this.aiEngine.detect(frameBuffer, activeModels);
+
+      if (!detections || detections.length === 0) {
+        return;
+      }
       this.stats.detectionsFound += detections.length;
 
-      const persons = detections.filter(d => d.label === 'person');
-      if (persons.length === 0) {
-        return;
-      }
+      const fw = frameWidth || 1280;
+      const fh = frameHeight || 720;
 
-      const fw = detections[0]?.frameWidth || 1280;
-      const fh = detections[0]?.frameHeight || 720;
-
-      // 3. Update ByteTrack Person Tracks across frames
-      const activeTracks = this.pipeline.updatePersonTracks(camera.id, persons, now, fw);
-      if (activeTracks.length === 0) {
-        return;
-      }
-
-      // 4. Multi-Service Two-Stage Evaluation with Priority Arbitration
-      const winner = await this.pipeline.evaluateCandidates(
+      // 3. Multi-Model Evaluation and Arbitration
+      const events = this.pipeline.evaluateDetections(
         camera,
-        activeTracks,
         detections,
         now,
         fw,
-        fh,
-        frameBuffer,
-        this.aiEngine
+        fh
       );
 
-      if (!winner) {
+      if (!events || events.length === 0) {
         return;
       }
 
-      // 5. Upload Detection Snapshot if client available
-      let snapshotUrl = null;
-      if (this.apiClient) {
-        const snapshotId = `edge_${camera.id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-        snapshotUrl = await this.apiClient.uploadSnapshot(snapshotId, frameBuffer);
-      }
-
-      const eventPayload = {
-        camera_id: camera.id,
-        camera_name: camera.name,
-        branch_id: camera.branchId || camera.branch_id || '',
-        ai_service_slug: winner.serviceSlug,
-        type: winner.type,
-        severity: winner.severity || 'medium',
-        confidence: parseFloat(winner.confidence.toFixed(2)),
-        bounding_boxes: JSON.stringify(winner.boundingBoxes),
-        snapshot_url: snapshotUrl || null,
-        metadata: JSON.stringify({
-          ...winner.metadata,
-          source: 'saqr-edge-directml',
-        }),
-      };
-
-      // 6. Ingest Detection to API Server
-      if (this.apiClient) {
-        try {
-          const res = await this.apiClient.postDetection(eventPayload);
-          this.stats.detectionsSent++;
-          if (res.deduplicated) {
-            console.log(`[AGENT] ⚡ Deduplicated alert: "${winner.type}" on ${camera.name}`);
-          } else {
-            console.log(`[AGENT] 🎯 Event logged: "${winner.type}" [${winner.severity}] on ${camera.name}`);
-          }
-        } catch (err) {
-          console.error(`[AGENT] Failed to ingest detection:`, err.message);
-          this.stats.errors++;
+      for (const event of events) {
+        // Upload Detection Snapshot if client available
+        let snapshotUrl = null;
+        if (this.apiClient) {
+          const snapshotId = `edge_${camera.id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+          snapshotUrl = await this.apiClient.uploadSnapshot(snapshotId, frameBuffer);
         }
-      }
 
-      // 7. Notify Local Electron Renderer Window
-      if (this.onDetection) {
-        this.onDetection({
-          ...eventPayload,
-          timestamp: new Date().toISOString(),
-          winner,
-        });
+        const eventPayload = {
+          camera_id: camera.id,
+          camera_name: camera.name,
+          branch_id: camera.branchId || camera.branch_id || '',
+          ai_service_slug: event.serviceSlug,
+          type: event.type,
+          severity: event.severity || 'medium',
+          confidence: parseFloat(event.confidence.toFixed(2)),
+          bounding_boxes: JSON.stringify(event.boundingBoxes),
+          snapshot_url: snapshotUrl || null,
+          metadata: JSON.stringify({
+            ...event.metadata,
+            source: 'saqr-edge-directml',
+          }),
+        };
+
+        // Ingest Detection to API Server
+        if (this.apiClient) {
+          try {
+            const res = await this.apiClient.postDetection(eventPayload);
+            this.stats.detectionsSent++;
+            if (res.deduplicated) {
+              console.log(`[AGENT] ⚡ Deduplicated alert: "${event.type}" on ${camera.name}`);
+            } else {
+              console.log(`[AGENT] 🎯 Event logged: "${event.type}" [${event.severity}] on ${camera.name}`);
+            }
+          } catch (err) {
+            console.error(`[AGENT] Failed to ingest detection:`, err.message);
+            this.stats.errors++;
+          }
+        }
+
+        // Notify Local Electron Renderer Window
+        if (this.onDetection) {
+          this.onDetection({
+            ...eventPayload,
+            timestamp: new Date().toISOString(),
+            winner: event,
+          });
+        }
       }
     } catch (err) {
       console.error('[AGENT] Processing error:', err.message);
