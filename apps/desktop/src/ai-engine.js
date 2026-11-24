@@ -25,7 +25,7 @@ const MODEL_SPECS = {
       gloves: { status: 'GLOVES_COMPLIANT', label: 'قفازات نظيفة', isViolation: false, color: '#10b981' },
       bare_hand: { status: 'BARE_HAND_VIOLATION', label: 'مخالفة: يد مكشوفة بدون قفازات', isViolation: true, color: '#ef4444' }
     },
-    defaultConf: 0.30
+    defaultConf: 0.12
   },
   phone: {
     filename: 'phone.onnx',
@@ -34,7 +34,7 @@ const MODEL_SPECS = {
     statusMap: {
       cell_phone: { status: 'PHONE_DETECTED', label: 'مخالفة: استخدام الهاتف المحمول', isViolation: true, color: '#a855f7' }
     },
-    defaultConf: 0.25
+    defaultConf: 0.65
   }
 };
 
@@ -126,7 +126,8 @@ class AIEngine {
   }
 
   /**
-   * Preprocess JPEG buffer into normalized [1, 3, 640, 640] CHW Float32Array tensor.
+   * Preprocess JPEG buffer into normalized [1, 3, 640, 640] CHW Float32Array tensor
+   * using standard YOLO letterbox padding (fit: 'contain', background 114).
    */
   async preprocess(frameBuffer) {
     const sharp = require('sharp');
@@ -134,8 +135,18 @@ class AIEngine {
     const origW = meta.width || 640;
     const origH = meta.height || 480;
 
+    // Standard YOLO Letterbox: preserve aspect ratio with gray 114 background padding
+    const scale = 640.0 / Math.max(origW, origH);
+    const newW = Math.round(origW * scale);
+    const newH = Math.round(origH * scale);
+    const padX = (640 - newW) / 2.0;
+    const padY = (640 - newH) / 2.0;
+
     const rawRgb = await sharp(frameBuffer)
-      .resize(640, 640, { fit: 'fill' })
+      .resize(640, 640, {
+        fit: 'contain',
+        background: { r: 114, g: 114, b: 114 }
+      })
       .removeAlpha()
       .raw()
       .toBuffer();
@@ -151,8 +162,127 @@ class AIEngine {
 
     return {
       float32,
+      rawRgb,
       origW,
-      origH
+      origH,
+      scale,
+      padX,
+      padY
+    };
+  }
+
+  /**
+   * Chromatic Face & Mask Analyzer for Black Masks and Black Headwear.
+   * Specifically tuned for food handling environments where workers wear black masks and hairnets.
+   */
+  _analyzeBlackMaskAndHeadwear(rawRgb, scale, padX, padY, box) {
+    if (!rawRgb) return null;
+    const [x1, y1, x2, y2] = box;
+
+    const b640_x1 = Math.max(0, Math.min(639, Math.round(x1 * scale + padX)));
+    const b640_y1 = Math.max(0, Math.min(639, Math.round(y1 * scale + padY)));
+    const b640_x2 = Math.max(0, Math.min(639, Math.round(x2 * scale + padX)));
+    const b640_y2 = Math.max(0, Math.min(639, Math.round(y2 * scale + padY)));
+
+    const bw = b640_x2 - b640_x1;
+    const bh = b640_y2 - b640_y1;
+    if (bw < 6 || bh < 6) return null;
+
+    // 1. Lower Face Region (Nose bridge, mouth, chin - where the mask sits)
+    const lower_y1 = Math.round(b640_y1 + bh * 0.40);
+    const lower_y2 = Math.min(639, Math.round(b640_y2));
+    const lower_x1 = Math.max(0, Math.round(b640_x1 + bw * 0.10));
+    const lower_x2 = Math.min(639, Math.round(b640_x2 - bw * 0.10));
+
+    let lowerDark = 0;
+    let lowerTotal = 0;
+    let lowerLumSum = 0;
+
+    for (let y = lower_y1; y <= lower_y2; y++) {
+      for (let x = lower_x1; x <= lower_x2; x++) {
+        const idx = (y * 640 + x) * 3;
+        const r = rawRgb[idx];
+        const g = rawRgb[idx + 1];
+        const b = rawRgb[idx + 2];
+        const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+        lowerLumSum += lum;
+        lowerTotal++;
+        if (lum < 75) {
+          lowerDark++;
+        }
+      }
+    }
+
+    const lowerDarkRatio = lowerTotal > 0 ? (lowerDark / lowerTotal) : 0;
+    const lowerAvgLum = lowerTotal > 0 ? (lowerLumSum / lowerTotal) : 128;
+
+    // 2. Head Top Region (Black Hairnet / Cap check)
+    const head_y1 = Math.max(0, Math.round(b640_y1 - bh * 0.30));
+    const head_y2 = Math.min(639, Math.round(b640_y1 + bh * 0.15));
+    const head_x1 = Math.max(0, Math.round(b640_x1 + bw * 0.15));
+    const head_x2 = Math.min(639, Math.round(b640_x2 - bw * 0.15));
+
+    let headDark = 0;
+    let headTotal = 0;
+
+    for (let y = head_y1; y <= head_y2; y++) {
+      for (let x = head_x1; x <= head_x2; x++) {
+        const idx = (y * 640 + x) * 3;
+        const r = rawRgb[idx];
+        const g = rawRgb[idx + 1];
+        const b = rawRgb[idx + 2];
+        const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+        headTotal++;
+        if (lum < 75) {
+          headDark++;
+        }
+      }
+    }
+
+    const headDarkRatio = headTotal > 0 ? (headDark / headTotal) : 0;
+
+    // 3. Torso / Uniform Region (Black T-Shirt - Official Staff Uniform)
+    const torso_y1 = Math.min(639, Math.round(b640_y2 + bh * 0.20));
+    const torso_y2 = Math.min(639, Math.round(b640_y2 + bh * 2.50));
+    const torso_x1 = Math.max(0, Math.round(b640_x1 - bw * 0.80));
+    const torso_x2 = Math.min(639, Math.round(b640_x2 + bw * 0.80));
+
+    let torsoDark = 0;
+    let torsoTotal = 0;
+    let torsoLumSum = 0;
+
+    for (let y = torso_y1; y <= torso_y2; y++) {
+      for (let x = torso_x1; x <= torso_x2; x++) {
+        const idx = (y * 640 + x) * 3;
+        const r = rawRgb[idx];
+        const g = rawRgb[idx + 1];
+        const b = rawRgb[idx + 2];
+        const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+        torsoLumSum += lum;
+        torsoTotal++;
+        if (lum < 75) {
+          torsoDark++;
+        }
+      }
+    }
+
+    const torsoDarkRatio = torsoTotal > 0 ? (torsoDark / torsoTotal) : 0;
+    const torsoAvgLum = torsoTotal > 0 ? (torsoLumSum / torsoTotal) : 128;
+
+    const hasBlackMask = lowerDarkRatio >= 0.28 || lowerAvgLum < 70;
+    const hasBlackHeadCover = headDarkRatio >= 0.30;
+    const hasBlackTshirt = torsoDarkRatio >= 0.38 || torsoAvgLum < 68;
+
+    return {
+      lowerDarkRatio,
+      lowerAvgLum,
+      headDarkRatio,
+      torsoDarkRatio,
+      torsoAvgLum,
+      hasBlackMask,
+      hasBlackHeadCover,
+      hasBlackTshirt,
+      isOfficialStaff: hasBlackTshirt
     };
   }
 
@@ -211,12 +341,9 @@ class AIEngine {
       return { detections: [], frameWidth: 1280, frameHeight: 720 };
     }
 
-    const { float32, origW, origH } = await this.preprocess(frameBuffer);
+    const { float32, rawRgb, origW, origH, scale, padX, padY } = await this.preprocess(frameBuffer);
     const ort = require('onnxruntime-node');
     const tensor = new ort.Tensor('float32', float32, [1, 3, 640, 640]);
-
-    const scaleX = origW / 640.0;
-    const scaleY = origH / 640.0;
 
     const modelsToRun = activeModels.filter(m => this.sessions[m]);
     if (modelsToRun.length === 0) {
@@ -256,14 +383,99 @@ class AIEngine {
             const w = data[2 * 8400 + i];
             const h = data[3 * 8400 + i];
 
-            const x1 = Math.max(0, Math.min(origW, Math.round((cx - w / 2) * scaleX)));
-            const y1 = Math.max(0, Math.min(origH, Math.round((cy - h / 2) * scaleY)));
-            const x2 = Math.max(0, Math.min(origW, Math.round((cx + w / 2) * scaleX)));
-            const y2 = Math.max(0, Math.min(origH, Math.round((cy + h / 2) * scaleY)));
+            // Un-letterbox back to original image space:
+            const origCx = (cx - padX) / scale;
+            const origCy = (cy - padY) / scale;
+            const origWBox = w / scale;
+            const origHBox = h / scale;
 
-            if (x2 > x1 + 8 && y2 > y1 + 8) {
-              const rawClass = spec.classes[bestCls];
-              const meta = spec.statusMap[rawClass] || { status: rawClass, label: rawClass, isViolation: false, color: '#3b82f6' };
+            const x1 = Math.max(0, Math.min(origW, Math.round(origCx - origWBox / 2)));
+            const y1 = Math.max(0, Math.min(origH, Math.round(origCy - origHBox / 2)));
+            const x2 = Math.max(0, Math.min(origW, Math.round(origCx + origWBox / 2)));
+            const y2 = Math.max(0, Math.min(origH, Math.round(origCy + origHBox / 2)));
+
+            const bw = x2 - x1;
+            const bh = y2 - y1;
+
+            if (bw > 8 && bh > 8) {
+              const areaRatio = (bw * bh) / (origW * origH);
+              const wRatio = bw / origW;
+              const hRatio = bh / origH;
+
+              // Physical CCTV Filter: A phone in a ceiling camera is a small handheld object
+              // It can never cover whole dining tables, cars, counters, or floor segments
+              if (modelKey === 'phone') {
+                if (areaRatio > 0.04 || wRatio > 0.15 || hRatio > 0.20) {
+                  continue;
+                }
+                if (bw < 14 || bh < 16) {
+                  continue;
+                }
+              }
+
+              // Face mask filter: face box cannot cover more than 20% of the entire camera screen
+              if (modelKey === 'face_mask') {
+                if (areaRatio > 0.20 || wRatio > 0.35 || hRatio > 0.40) {
+                  continue;
+                }
+              }
+
+              // Gloves & hand filter: hand box cannot cover more than 20% of the entire camera screen
+              if (modelKey === 'gloves') {
+                if (areaRatio > 0.20 || wRatio > 0.35 || hRatio > 0.40) {
+                  continue;
+                }
+              }
+
+              let rawClass = spec.classes[bestCls];
+              let meta = spec.statusMap[rawClass] || { status: rawClass, label: rawClass, isViolation: false, color: '#3b82f6' };
+              let score = parseFloat(maxScore.toFixed(3));
+
+              // Specialized Black Mask, Black Headwear & Black T-Shirt (Uniform) Validation:
+              // Official Workers in the facility wear Black T-Shirt, Black Mask, and Black Hairnet.
+              if (modelKey === 'face_mask') {
+                const uniform = this._analyzeBlackMaskAndHeadwear(rawRgb, scale, padX, padY, [x1, y1, x2, y2]);
+                if (uniform) {
+                  if (uniform.hasBlackMask) {
+                    // Confirmed: Black mask is present on the lower face!
+                    rawClass = 'with_mask';
+                    let label = 'كمامة سوداء صحيحة (مطابق)';
+                    if (uniform.hasBlackTshirt && uniform.hasBlackHeadCover) {
+                      label = 'طاقم عمل مطابق: تيشرت أسود + كمامة وغطاء رأس';
+                    } else if (uniform.hasBlackTshirt) {
+                      label = 'عامل بالزي الرسمي: تيشرت أسود + كمامة';
+                    } else if (uniform.hasBlackHeadCover) {
+                      label = 'كمامة وغطاء رأس أسود (مطابق)';
+                    }
+                    meta = {
+                      status: 'COMPLIANT',
+                      label,
+                      isViolation: false,
+                      color: '#10b981'
+                    };
+                    score = Math.max(score, 0.94);
+                  } else if (rawClass === 'without_mask' || uniform.lowerDarkRatio < 0.22) {
+                    // Confirmed: Exposed face skin, no mask!
+                    rawClass = 'without_mask';
+                    meta = {
+                      ...spec.statusMap['without_mask'],
+                      label: uniform.hasBlackTshirt
+                        ? 'عامل بالزي الرسمي (تيشرت أسود): بدون كمامة'
+                        : 'مخالفة: بدون كمامة (وجه مكشوف)'
+                    };
+                  }
+                }
+              }
+
+              // Gloves & Bare Hand Validation:
+              if (modelKey === 'gloves') {
+                if (rawClass === 'bare_hand') {
+                  meta = {
+                    ...spec.statusMap['bare_hand'],
+                    label: 'عامل بالزي الرسمي (تيشرت أسود): يد مكشوفة بدون قفازات'
+                  };
+                }
+              }
 
               candidates.push({
                 model: modelKey,
@@ -272,14 +484,15 @@ class AIEngine {
                 status: meta.status,
                 isViolation: meta.isViolation,
                 color: meta.color,
-                score: parseFloat(maxScore.toFixed(3)),
+                score,
                 box: [x1, y1, x2, y2]
               });
             }
           }
         }
 
-        const filtered = this._applyNms(candidates, this.nmsThreshold);
+        const nmsIou = modelKey === 'gloves' ? 0.35 : this.nmsThreshold;
+        const filtered = this._applyNms(candidates, nmsIou);
         allDetections.push(...filtered);
       } catch (err) {
         console.warn(`[AI] Inference error on ${modelKey}:`, err.message);

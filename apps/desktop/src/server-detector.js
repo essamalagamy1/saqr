@@ -151,22 +151,27 @@ class ServerDetector {
           const frame = await this.fetchFrame(cam);
           if (!frame || frame.length < 8000) continue;
 
-          // Parse active models from camera config or default to all 3
-          let activeModels = ['face_mask', 'gloves', 'phone'];
-          if (cam.activeModels && Array.isArray(cam.activeModels)) {
+          // Parse active models from camera config strictly based on user selection
+          let activeModels = [];
+          if (Array.isArray(cam.activeModels)) {
             activeModels = cam.activeModels;
           } else if (cam.config) {
             try {
               const cfg = typeof cam.config === 'string' ? JSON.parse(cam.config) : cam.config;
-              if (cfg.activeModels) activeModels = cfg.activeModels;
-              else if (cfg.enabled_services) {
+              if (Array.isArray(cfg.activeModels)) {
+                activeModels = cfg.activeModels;
+              } else if (Array.isArray(cfg.enabled_services)) {
                 activeModels = [];
                 if (cfg.enabled_services.includes('kitchen_ppe') || cfg.enabled_services.includes('face_mask')) activeModels.push('face_mask');
                 if (cfg.enabled_services.includes('gloves')) activeModels.push('gloves');
                 if (cfg.enabled_services.includes('phone_usage') || cfg.enabled_services.includes('phone')) activeModels.push('phone');
-                if (activeModels.length === 0) activeModels = ['face_mask', 'gloves', 'phone'];
               }
             } catch {}
+          }
+
+          // If no models are enabled on this camera, skip it immediately!
+          if (!activeModels || activeModels.length === 0) {
+            continue;
           }
 
           // 1. Run Multi-Model Detection

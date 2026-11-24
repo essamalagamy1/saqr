@@ -81,11 +81,6 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           icon: BrainCircuit,
           badge: '3 نماذج'
         },
-        {
-          label: 'مختبر فحص ومطابقة PPE',
-          href: '/ppe-test',
-          icon: ShieldCheck,
-        },
       ],
     },
   ];

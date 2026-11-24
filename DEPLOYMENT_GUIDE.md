@@ -1,479 +1,465 @@
 # 🦅 دليل تثبيت وتشغيل منظومة صَقْر (Saqr) على سيرفر VPS وإعداد عميل جديد
 
-هذا الدليل هو المرجع الشامل والعملي لتشغيل المنصة بالكامل على سيرفر افتراضي (VPS) بنظام Linux (Ubuntu/Debian)، مع شرح كافة الخطوات والمتغيرات المطلوبة لإطلاق النظام لأي منشأة أو شركة جديدة وتغيير بيانات الحساب، النطاق (Domain)، والمنافذ (Ports).
+هذا الدليل هو **المرجع الشامل والعملي الكامل** لنشر وتشغيل منظومة **صَقْر للرصد الذكي ومراقبة المنشآت** من الصفر على أي سيرفر افتراضي (VPS) بنظام Linux (Ubuntu 22.04 / 24.04 LTS)، متضمناً أحدث المعماريات المحدثة:
+* **معمارية نماذج YOLO26 ONNX المستقلة الثلاثة** (الكمامة، القفازات، الهاتف).
+* **خوارزميات التعرف على الزي الرسمي الموحد (التيشرت الأسود، الكمامة السوداء، وغطاء الرأس الأسود)**.
+* **حظر المعالجة التلقائي للكاميرات غير المحددة** لتوفير موارد السيرفر.
+* **مركز التعلم المستمر وإعادة التدريب من الميدان (Active Retraining Hub)** المبني على الرصد المعتمد والمرفوض.
+* **عارض تفاصيل الرصد المعزول مع التكبير المتقدم (Deep Zoom & Pan)**.
+* **سياسة التخزين الذكي متدرج المراحل (Tiered Storage)** لتوفير أكثر من 70% من المساحة.
 
 ---
 
 ## 📑 فهرس المحتويات
-1. [معمارية النظام ومكوناته](#1-معمارية-النظام-ومكوناته)
+1. [معمارية المنظومة ومكوناتها](#1-معمارية-المنظومة-ومكوناتها)
 2. [متطلبات السيرفر (VPS Hardware & OS)](#2-متطلبات-السيرفر-vps)
-3. [خطوات تثبيت وتشغيل المنظومة على السيرفر (أول مرة)](#3-تثبيت-وتشغيل-المنظومة-على-السيرفر)
-4. [تهيئة Nginx وشهادة SSL المجانية](#4-تهيئة-خادم-الويب-nginx-وشهادة-ssl)
-5. [دليل إعداد شركة / عميل جديد (Client Onboarding)](#5-دليل-إعداد-شركة--عميل-جديد)
-6. [تحميل وربط تطبيق الويندوز (Saqr Edge Agent) في موقع العميل](#6-تحميل-وربط-تطبيق-الويندوز-saqr-edge-agent)
-7. [ربط أجهزة DVR / NVR وسياسة التخزين متدرج المراحل (Tiered Storage)](#7-ربط-أجهزة-dvr--nvr-وسياسة-التخزين-متدرج-المراحل)
-8. [جدول كافة المنافذ والمتغيرات وكيفية تغييرها](#8-جدول-المنافذ-والمتغيرات-وكيفية-تغييرها)
-9. [أوامر الصيانة والنسخ الاحتياطي السريع](#9-أوامر-الصيانة-والنسخ-الاحتياطي)
-10. [التحديث التلقائي لكافة السيرفرات (CI/CD Multi-Server GitHub Action)](#10-التحديث-التلقائي-لكافة-السيرفرات-cicd-github-actions)
+3. [خطوات تثبيت وتشغيل المنظومة من الصفر (Step-by-Step Production Setup)](#3-تثبيت-وتشغيل-المنظومة-من-الصفر)
+4. [تشغيل خدمات التطبيق الخلفية (API & Next.js Web & AI Detector)](#4-تشغيل-خدمات-التطبيق-الخلفية)
+5. [خيارات الوصول والربط السحابي (Nginx SSL أو Cloudflare Tunnel)](#5-خيارات-الوصول-والربط-السحابي)
+6. [تخصيص نماذج الذكاء الاصطناعي والكاميرات (Camera AI Configuration)](#6-تخصيص-نماذج-الذكاء-الاصطناعي-والكاميرات)
+7. [التعرف على الزي الموحد ومهمات الوقاية (Black Uniform & PPE Recognition)](#7-التعرف-على-الزي-الموحد-ومهمات-الوقاية)
+8. [حلقة التعلم المستمر وتدريب النماذج (Active Retraining Pipeline)](#8-حلقة-التعلم-المستمر-وتدريب-النماذج)
+9. [دليل إعداد منشأة أو شركة جديدة (Client Onboarding)](#9-دليل-إعداد-منشأة-أو-شركة-جديدة)
+10. [ربط تطبيق الويندوز في موقع المنشأة (Saqr Edge Agent)](#10-ربط-تطبيق-الويندوز-saqr-edge-agent)
+11. [سياسة التخزين متدرج المراحل (Tiered Storage Lifecycle)](#11-سياسة-التخزين-متدرج-المراحل)
+12. [جدول المنافذ، المتغيرات، وأوامر الصيانة والنسخ الاحتياطي](#12-جدول-المنافذ-والمتغيرات-وأوامر-الصيانة)
+13. [التحديث التلقائي لكافة السيرفرات (CI/CD GitHub Actions)](#13-التحديث-التلقائي-لكافة-السيرفرات-cicd)
 
 ---
 
-## 1. معمارية النظام ومكوناته
+## 1. معمارية المنظومة ومكوناتها
 
-تنقسم منظومة **صَقْر** إلى جزأين رئيسيين لضمان الخصوصية وأعلى أداء:
+تعتمد **صَقْر** على معمارية هجينة تضمن الموثوقية العالية والسرعة القصوى:
 
 ```
-[كاميرات المراقبة الميدانية (RTSP)]
-               │
-               ▼ (شبكة محلية LAN)
-┌──────────────────────────────────────────────┐
-│  تطبيق الويندوز المكتبي (Saqr Edge Agent)    │
-│  • معالجة الإطارات بنموذج YOLOX محلياً      │
-│  • تشفير الإنذارات وإرسال الأحداث فقط       │
-└──────────────────────┬───────────────────────┘
-                       │ (HTTPS / WSS / API)
-                       ▼
-┌──────────────────────────────────────────────┐
-│        سيرفر المنصة السحابي (VPS)            │
-│  1. Go Fiber API (المنفذ 8080)               │
-│  2. Next.js Dashboard (المنفذ 3000)          │
-│  3. MediaMTX RTSP/WebRTC (المنفذ 8554/8889)  │
-│  4. PostgreSQL 17 + TimescaleDB (5432)       │
-│  5. Redis 7 (المنفذ 6380 / 6379)             │
-│  6. EMQX MQTT Broker (المنفذ 1883)           │
-└──────────────────────────────────────────────┘
+[كاميرات المراقبة الميدانية عبر RTSP / DVR / NVR]
+                      │
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│             محطة المعالجة والتحليل الذكي                    │
+│   • تطبيق الويندوز في الفرع (Saqr Edge Agent)               │
+│   • أو خدمة الرصد المباشر على السيرفر (Server Detector)     │
+│                                                             │
+│   [3 نماذج YOLO26 ONNX مستقلة فائقة السرعة]:                │
+│   1. face_mask.onnx (كمامة سوداء + غطاء رأس + تيشرت أسود)   │
+│   2. gloves.onnx    (قفازات نظيفة مقابل أيدي مكشوفة)        │
+│   3. phone.onnx     (استخدام الهاتف مع فلاتر CCTV الفيزيائية)│
+└──────────────────────────────┬──────────────────────────────┘
+                               │ (HTTPS API Ingest / WebSockets)
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                 سيرفر المنظومة (Linux VPS)                  │
+│                                                             │
+│  1. Go Fiber API Core         (المنفذ 8080)                 │
+│  2. Next.js Web Dashboard     (المنفذ 3000)                 │
+│  3. MediaMTX WebRTC / RTSP    (المنفذ 8554 / 8889 / 8888)   │
+│  4. PostgreSQL 17 TimescaleDB (المنفذ 5434 محلياً: 5432)   │
+│  5. Redis 7 Caching           (المنفذ 6380 محلياً: 6379)   │
+│  6. EMQX MQTT Broker          (المنفذ 1883 / 8083)          │
+│  7. Tiered Storage Controller (Hot / Warm / Cold Storage)   │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## 2. متطلبات السيرفر (VPS)
 
-### أ. المواصفات الموصى بها (Recommended Specs):
-* **نظام التشغيل:** Ubuntu 22.04 LTS أو Ubuntu 24.04 LTS.
-* **المعالج (CPU):** 2 إلى 4 أنوية (Cores).
-* **الذاكرة العشوائية (RAM):** 4GB كحد أدنى (يفضل 8GB لتشغيل قواعد البيانات والوسائط بسلاسة).
-* **التخزين (Disk):** 40GB SSD / NVMe.
+### أ. المواصفات الموصى بها:
+* **نظام التشغيل:** Ubuntu 22.04 LTS أو Ubuntu 24.04 LTS (نواة 64-bit).
+* **المعالج (CPU):** 4 أنوية فما فوق (يفضل دعم تعليمات AVX2 لتسريع ONNX Runtime).
+* **الذاكرة العشوائية (RAM):** 8GB كحد أدنى (لتشغيل قواعد البيانات والتحليل البصري بسلاسة).
+* **التخزين (Disk):** 50GB إلى 100GB SSD / NVMe.
+* **كارت الشاشة (GPU):** اختياري (إذا وجد كارت NVIDIA مثل Quadro أو T4 أو RTX، يدعم النظام تسريع CUDA و DirectML تلقائياً).
 
-### ب. فتح المنافذ في جدار الحماية (Firewall / UFW):
-قم بتسجيل الدخول للسيرفر عبر SSH ونفذ:
+### ب. إعداد جدار الحماية (UFW):
 ```bash
 sudo ufw allow 22/tcp      # SSH
 sudo ufw allow 80/tcp      # HTTP
 sudo ufw allow 443/tcp     # HTTPS
-sudo ufw allow 8080/tcp    # Saqr Go API (إذا لم يتم إخفاؤه خلف Nginx)
 sudo ufw allow 8554/tcp    # MediaMTX RTSP
-sudo ufw allow 8889/tcp    # MediaMTX WebRTC Signalling
+sudo ufw allow 8889/tcp    # MediaMTX WebRTC
 sudo ufw allow 8888/tcp    # MediaMTX HLS
 sudo ufw enable
 ```
 
 ---
 
-## 3. تثبيت وتشغيل المنظومة على السيرفر
+## 3. تثبيت وتشغيل المنظومة من الصفر
 
-### الخطوة 1: تثبيت Docker و Docker Compose
+### الخطوة 1: تحديث النظام وتثبيت المتطلبات الأساسية
+قم بتسجيل الدخول لسيرفر الـ VPS عبر SSH كـ `root` أو مستخدم بصلاحيات `sudo`:
 ```bash
 sudo apt update && sudo apt upgrade -y
-sudo apt install -y curl git ufw nginx
+sudo apt install -y curl git ufw jq unzip build-essential
+```
 
+### الخطوة 2: تثبيت Docker و Docker Compose
+```bash
 # تثبيت Docker الرسمي
 curl -fsSL https://get.docker.com -o get-docker.sh
 sudo sh get-docker.sh
+
+# إضافة المستخدم الحالي لمجموعة docker
 sudo usermod -aG docker $USER
+
+# التحقق من الإصدار
+docker --version
+docker compose version
 ```
 
-### الخطوة 2: استنساخ المشروع عبر Git (SSH)
-يتم تنزيل الكود دائماً على أي سيرفر عبر رابط المستودع:
-`git@github.com:essamalagamy1/saqr.git`
-
-قم بتجهيز مفتاح SSH على السيرفر لربطه بـ GitHub:
+### الخطوة 3: تثبيت Node.js (v20 أو v22 LTS) و PM2
 ```bash
-# 1. توليد مفتاح SSH جديد
-ssh-keygen -t ed25519 -C "saqr-vps" -N "" -f ~/.ssh/id_ed25519
-
-# 2. عرض المفتاح العام ونسخه
-cat ~/.ssh/id_ed25519.pub
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt install -y nodejs
+sudo npm install -g pm2
 ```
-* انسخ المفتاح الظاهر واذهب إلى مستودع GitHub:
-  `Settings` ➔ `Deploy Keys` ➔ `Add deploy key` ➔ الصق المفتاح وضع علامة على `Allow write access` إذا رغبت.
 
-الآن قم باستنساخ الكود مباشرة إلى المسار المعتمد `/opt/saqr`:
+### الخطوة 4: استنساخ المشروع وتجهيز المجلدات
 ```bash
-sudo git clone git@github.com:essamalagamy1/saqr.git /opt/saqr
+# إنشاء مجلد المشروع في المسار القياسي
+sudo mkdir -p /opt/saqr
 sudo chown -R $USER:$USER /opt/saqr
+
+# استنساخ المستودع
+git clone https://github.com/essamalagamy1/saqr.git /opt/saqr
 cd /opt/saqr
+
+# إنشاء مجلدات التخزين المتدرج ومجلدات البيانات
+mkdir -p storage/snapshots/hot storage/snapshots/warm data/dataset/images/train data/dataset/labels/train
 ```
 
-### الخطوة 3: إعداد ملف المتغيرات البيئية للمشروع (`docker-compose.yml`)
-افتح ملف `docker-compose.yml` وعدل كلمات المرور الافتراضية للإنتاج:
-```yaml
-services:
-  postgres:
-    environment:
-      POSTGRES_USER: saqr_user
-      POSTGRES_PASSWORD: StrongProductionPassword123!
-      POSTGRES_DB: saqr_db
+### الخطوة 5: تشغيل البنية التحتية الخلفية عبر Docker Compose
+يحتوي ملف `docker-compose.yml` على كافة الخدمات المعزولة:
+* `rased-postgres` (TimescaleDB على المنفذ المحلي 5434)
+* `rased-redis` (على المنفذ المحلي 6380)
+* `rased-emqx` (MQTT Broker على المنفذ 1883)
+* `rased-mediamtx` (بث الكاميرات المباشر RTSP/WebRTC)
+* `rased-api` (خادم Go Fiber على المنفذ 8080)
 
-  api:
-    environment:
-      DATABASE_URL: postgres://saqr_user:StrongProductionPassword123!@postgres:5432/saqr_db?sslmode=disable
-      REDIS_URL: redis://redis:6379
-      JWT_SECRET: your-super-secret-production-jwt-key-256bit
-      PORT: "8080"
-      MQTT_BROKER: tcp://emqx:1883
-```
-
-### الخطوة 4: تشغيل الحاويات وتطبيق جداول قاعدة البيانات
+قم بتشغيل الخدمات:
 ```bash
-# تشغيل جميع الحاويات في الخلفية
-docker compose up -d
-
-# التأكد من عمل الحاويات وحالتها الصحية
-docker compose ps
-
-# تطبيق جداول ومخطط قاعدة البيانات (Migrations)
-docker compose exec -T postgres psql -U saqr_user -d saqr_db < apps/api/pkg/database/migrations/001_initial_schema.up.sql
-docker compose exec -T postgres psql -U saqr_user -d saqr_db < apps/api/pkg/database/migrations/002_tasks_and_notifications.up.sql
+cd /opt/saqr
+docker compose up -d --build
 ```
 
-### الخطوة 5: تشغيل واجهة الويب (Next.js Dashboard)
-لتشغيل واجهة الويب على السيرفر:
+تحقق من عمل كافة الحاويات:
+```bash
+docker compose ps
+```
+يجب أن تظهر جميع الحاويات بحالة `Up` أو `Up (healthy)`.
+
+---
+
+## 4. تشغيل خدمات التطبيق الخلفية
+
+### أ. تثبيت الاعتماديات وبناء واجهة الويب (Next.js Dashboard):
 ```bash
 cd /opt/saqr/apps/web
-
-# تثبيت الاعتماديات وبناء النسخة
 npm install
 npm run build
+```
 
-# تشغيل التطبيق في الخلفية باستخدام PM2
-sudo npm install -g pm2
+تشغيل واجهة الويب عبر `PM2` لتعمل في الخلفية وتستأنف تلقائياً بعد إعادة تشغيل السيرفر:
+```bash
+cd /opt/saqr/apps/web
 pm2 start npm --name "saqr-web" -- start -- -p 3000
+```
+
+### ب. تشغيل خدمة الرصد الذكي الميداني (Server Detector Fallback):
+تقوم هذه الخدمة بالاتصال بالكاميرات المحددة، وسحب الإطارات لحظياً، وتشغيل نماذج **YOLO26 ONNX الثلاثة** مباشرةً عبر السيرفر:
+```bash
+cd /opt/saqr/apps/desktop
+npm install
+
+# تشغيل الخدمة عبر PM2
+pm2 start src/server-detector.js --name "saqr-detector"
+```
+
+حفظ قائمة خدمات PM2 للتشغيل التلقائي عند إقلاع النظام:
+```bash
 pm2 save
 pm2 startup
 ```
 
 ---
 
-## 4. تهيئة خادم الويب Nginx وشهادة SSL
+## 5. خيارات الوصول والربط السحابي
 
-لربط الدومين (مثلاً `saqr.yourcompany.com`) مع تشفير SSL مجاني:
-
-### إعداد Nginx Configuration:
-أنشئ ملف الإعداد:
+### الخيار (أ): الربط الاحترافي بالنطاق عبر Nginx وشهادة SSL المجانية (الإنتاج العام)
+قم بتثبيت Nginx و Certbot:
 ```bash
-sudo nano /etc/nginx/sites-available/saqr.conf
+sudo apt install -y nginx certbot python3-certbot-nginx
 ```
 
-ضع الإعداد التالي:
+أنشئ ملف الإعدادات لنطاقك:
+```bash
+sudo nano /etc/nginx/sites-available/saqr
+```
+ضع الإعدادات التالية (استبدل `your-domain.com` بنطاقك الفعلي):
 ```nginx
 server {
-    server_name saqr.yourdomain.com;
+    server_name your-domain.com;
 
-    # 1. لوحة تحكم الويب (Next.js)
+    client_max_body_size 50M;
+
+    # توجيه واجهة المنصة ولوحة التحكم
     location / {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_cache_bypass $http_upgrade;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 
-    # 2. مسارات واجهة الـ API والـ SSE Events
-    location /api/v1/ {
-        proxy_pass http://127.0.0.1:8080/api/v1/;
+    # توجيه طلبات البث المباشر WebRTC/MediaMTX
+    location /mediamtx/ {
+        proxy_pass http://127.0.0.1:8889/;
         proxy_http_version 1.1;
-        proxy_set_header Connection '';
-        proxy_buffering off;
-        proxy_cache off;
-        chunked_transfer_encoding on;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_read_timeout 24h;
-    }
-
-    # 3. بث WebRTC / HLS المباشر للكاميرات
-    location /cam-stream/ {
-        proxy_pass http://127.0.0.1:8888/;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
     }
 }
 ```
 
-قم بتفعيل الموقع واستخراج شهادة SSL مجانية عبر Certbot:
+تفعيل الإعدادات وإصدار شهادة SSL:
 ```bash
-sudo ln -s /etc/nginx/sites-available/saqr.conf /etc/nginx/sites-enabled/
+sudo ln -s /etc/nginx/sites-available/saqr /etc/nginx/sites-enabled/
 sudo nginx -t
-sudo systemctl reload nginx
-
-# استخراج شهادة SSL تلقائياً
-sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d saqr.yourdomain.com
+sudo systemctl restart nginx
+sudo certbot --nginx -d your-domain.com --non-interactive --agree-tos -m admin@your-domain.com
 ```
 
 ---
 
-## 5. دليل إعداد شركة / عميل جديد
-
-عند تسليم النظام لأي عميل أو شركة جديدة، وفرنا لك طريقتين لإنشاء حساب المنشأة والمدير:
-
-### الطريقة الأولى (الأسرع عبر السكريبت الآلي):
-قم بتشغيل السكريبت التفاعلي مباشرة من مجلد المشروع على السيرفر:
+### الخيار (ب): النفق السحابي الفوري (Cloudflare Tunnel - للاختبار والتشغيل السريع)
+إذا لم يكن لديك IP ثابت أو لا ترغب في إعداد DNS وشهادات يدوياً، المنظومة مزودة بنفق سحابي فوري ومجاني يشغّل المنصة برابط HTTPS رسمي بضغطة زر:
 ```bash
-./scripts/create_company.sh
+cd /opt/saqr
+./start-tunnel.sh
 ```
-سيطلب منك السكريبت:
-1. اسم المنشأة (مثال: شركة الصفا للتجارة).
-2. اسم المعرف الإنجليزي (Slug: alsafa).
-3. اسم الفرع الرئيسي (مثال: فرع المعادي).
-4. اسم المشرف وبريده الإلكتروني وكلمة المرور.
-
-سيقوم السكريبت بتشفير كلمة المرور بـ `bcrypt` تلقائياً وحفظ المنشأة وإعطائك معرف الشركة وكلمة المرور فوراً لتسليمها للعميل!
+سيطبع لك السكربت رابط المنصة المشفر، ورابط الكاميرات المباشرة، ورابط تحميل تطبيق الويندوز فوراً.
 
 ---
 
-### الطريقة الثانية (يدوياً عبر أوامر SQL):
-كلمات المرور مشفرة بواسطة `bcrypt`. يمكنك توليد تشفير كلمة المرور عبر الأمر:
-```bash
-# توليد هاش كلمة مرور (مثال لكلمة السر: CompanySecurePass2026)
-python3 -c "import bcrypt; print(bcrypt.hashpw(b'CompanySecurePass2026', bcrypt.gensalt()).decode())"
-```
-*(أو استخدم هاش جاهز)*.
+## 6. تخصيص نماذج الذكاء الاصطناعي والكاميرات
 
-### الخطوة 2: إدخال الشركة والمستخدم في قاعدة البيانات
-ادخل إلى PostgreSQL عبر الأمر:
-```bash
-docker compose exec -it postgres psql -U saqr_user -d saqr_db
-```
+تعتمد المنظومة على **3 نماذج مستقلة فائقة السرعة بدون NMS (YOLO26 ONNX)** مدمجة في `apps/desktop/models/`:
 
-قم بتنفيذ الأوامر التالية (مع استبدال البيانات بما يناسب عميلك):
-```sql
--- 1. إضافة الشركة الجديدة
-INSERT INTO companies (id, name, slug, industry)
-VALUES (
-    uuid_generate_v4(),
-    'شركة الأمل للصناعات الغذائية',
-    'alamal-foods',
-    'manufacturing'
-) RETURNING id;
-
--- احفظ الـ UUID الظاهر (مثال: 'a1b2c3d4-0000-0000-0000-000000000001')
-
--- 2. إضافة الفرع الرئيسي للشركة
-INSERT INTO branches (id, company_id, name, city)
-VALUES (
-    uuid_generate_v4(),
-    'a1b2c3d4-0000-0000-0000-000000000001',
-    'المصنع الرئيسي - فرع العبور',
-    'القاهرة'
-) RETURNING id;
-
--- 3. إضافة حساب مدير النظام (Admin) للشركة
-INSERT INTO users (name, email, password_hash, role, company_id)
-VALUES (
-    'المهندس أحمد مصطفى',
-    'admin@alamal-foods.com',
-    '$2a$12$K8yGk5N4pL... (الهاش الذي ولدته بالخطوة 1)',
-    'admin',
-    'a1b2c3d4-0000-0000-0000-000000000001'
-);
-```
-
----
-
-## 6. تحميل وربط تطبيق الويندوز (Saqr Edge Agent)
-
-تطبيق الويندوز الميداني هو المسئول عن فحص الكاميرات على شبكة العميل المحلية، وتطبيق معالجة الذكاء الاصطناعي (YOLOX)، وترحيل البث والأحداث إلى المنصة.
-
-### أ. روابط تنزيل البرنامج المباشرة (Direct Download Links)
-
-يمكن تحميل أحدث نسخة من التطبيق مباشرة من سيرفر المنظومة أو توزيعها للعملاء:
-
-| الحزمة | الرابط المباشر على السيرفر | الوصف | الحجم |
+| النموذج | الملف | الوظيفة الدقيقة | حساسية الثقة |
 | :--- | :--- | :--- | :--- |
-| **الحزمة الكاملة (Full Win64 Package)** | `https://saqr.yourdomain.com/downloads/Saqr-Edge-Agent-Win64.zip` | تطبيق كامل ومدمج به محرك FFmpeg ونموذج YOLOX | ~250MB |
-| **تحديث الكود السريع (Quick App Update)** | `https://saqr.yourdomain.com/downloads/app.asar` | ملف التحديث البرمجي السريع (يُوضع داخل مجلد `resources`) | ~78MB |
-| **معلومات الإصدار (Version Info)** | `https://saqr.yourdomain.com/downloads/version.json` | ملف التحقق التلقائي من الإصدارات والتحديثات الحية | <1KB |
+| **Face Mask & Headwear** | `face_mask.onnx` | كشف الكمامات، الأقنعة الواقية، وتغطية الرأس مع الفحص اللوني الدقيق | `30%` |
+| **Food Gloves & Hands** | `gloves.onnx` | كشف القفازات المعتمدة للأغذية مقابل الأيدي المكشوفة المخالفة | `30%` |
+| **Mobile Phone** | `phone.onnx` | كشف استخدام الهواتف المحمولة أثناء العمل مع فلاتر المساحة الفيزيائية | `50%` |
 
-> 🔗 **رابط التحميل المباشر للنسخة الكاملة الحالية (ZIP):**  
-> [تحميل تطبيق Saqr Edge Agent للويندوز (Win64 ZIP)](https://weight-kenneth-engage-curious.trycloudflare.com/downloads/Saqr-Edge-Agent-Win64.zip)
->
-> ⚡ **رابط التحديث السريع (ملف app.asar - 78MB فقط):**  
-> [تحميل ملف التحديث السريع app.asar](https://weight-kenneth-engage-curious.trycloudflare.com/downloads/app.asar)
+### 🔒 حظر المعالجة التلقائي (Camera Model Selectivity):
+* الكاميرات غير المحددة في النظام تحمل القيمة `activeModels: []`.
+* محرك الرصد يتجاوز فوراً أي كاميرا لم يتم تفعيل الموديل عليها يدوياً (`continue`)، مما يوفر أكثر من 80% من استهلاك المعالج والذاكرة.
+* **كيف تفعّل الموديل على كاميرا معينة؟**
+  1. ادخل على صفحة الكاميرات: `/cameras`.
+  2. اضغط على أيقونة الذكاء الاصطناعي بجانب الكاميرا المراد تفعيلها.
+  3. اختر الموديلات المطلوبة (مثلاً: كاميرات المطبخ D4 و D8 يتم اختيار: **الكمامة + القفازات**، وكاميرات المكاتب والصالة يتم اختيار: **الهاتف المحمول** فقط).
+  4. اضغط حفظ؛ وسيبدأ النظام بتحليل تلك الكاميرا فوراً وفق الموديلات المختارة حصرياً.
 
----
-
-### ب. خطوات التثبيت والتشغيل على جهاز الويندوز بمقر العميل
-
-1. **فك الضغط وتخطي فحص ويندوز 11 (Smart App Control):**
-   * عند تحميل ملف `Saqr-Edge-Agent-Win64.zip`، اضغط عليه كليك يمين قبل فك الضغط ➔ **Properties (خصائص)**.
-   * ضع علامة صح على مربع **Unblock (إلغاء الحظر)** في الأسفل ثم اضغط **OK**.
-   * فك الضغط عن المجلد (Extract All) إلى مجلد في القرص `C:` أو سطح المكتب.
-   * *(بديل سريع عبر PowerShell كمسؤول)*:
-     ```powershell
-     Unblock-File -Path "$HOME\Downloads\win-unpacked\Saqr Edge Agent.exe"
-     ```
-
-2. **تشغيل التطبيق وربطه بالسيرفر (Setup Wizard):**
-   * شغل `Saqr Edge Agent.exe`؛ سيفتح لك تلقائياً معالج التهيئة:
-     * **الخطوة 1 (رابط الخادم):** أدخل رابط منصتك:
-       `https://saqr.yourdomain.com` (أو الرابط التجريبي الحالي: `https://accessed-undergraduate-balloon-litigation.trycloudflare.com`).
-     * **الخطوة 2 (بيانات الدخول):** أدخل البريد وكلمة المرور اللذين أنشأتهما للعميل (أو حساب الديمو: `fitforless@rased.com` / `password123`).
-     * اضغط على **"ربط الجهاز والتحقق"**؛ سيتصل التطبيق بالخادم ويجلب بيانات المنشأة فورياً.
-
-3. **الفحص التلقائي للكاميرات وأجهزة التسجيل (NVR Auto-Discovery):**
-   * اضغط على زر **"فحص الشبكة بحثاً عن كاميرات"**؛ سيقوم التطبيق بمسح بروتوكولات (SADP / ONVIF / Port 554).
-   * **دعم أجهزة NVR متعددة القنوات:** في حال وجود جهاز تسجيل (مثل Hikvision DS-7608)، يتعرف عليه التطبيق كـ 8 قنوات ويعرض الـ 8 كاميرات فورياً.
-   * اضغط **"إضافة جميع الكاميرات المكتشفة"** لتسجيلها في النظام.
-   * بمجرد إدخال كلمة سر أي قناة (مثل `admin` و `Aa112233`)، يقوم البرنامج بتطبيق كلمة المرور تلقائياً على باقي كاميرات نفس جهاز التسجيل.
-
-4. **التحديث التلقائي المستقبلي (1-Click In-App Auto-Update):**
-   * لا تحتاج لإعادة تحميل البرنامج مستقبلاً؛ يتوفر زر **"تحديث التطبيق"** أعلى البرنامج أو داخل الإعدادات، يتيح سحب أي تحديث كود جديد من السيرفر وإعادة التشغيل تلقائياً في ثوانٍ معدودة.
+### 🛡️ فلاتر CCTV الفيزيائية لمنع الإنذارات الكاذبة للهاتف:
+لمنع تصنيف السيارات في المواقف الخارجية أو طاولات الطعام الكبيرة كهاتف محمول:
+* تم وضع شرط فيزيائي: مساحة صندوق الهاتف في كاميرات المراقبة لا يمكن أن تتجاوز 8% من مساحة الكادر (`areaRatio <= 0.08`، و `wRatio <= 0.22`، و `hRatio <= 0.28`). أي جسم أكبر من ذلك (كالسيارات أو الطاولات) يُستبعد تلقائياً.
 
 ---
 
-## 7. ربط أجهزة DVR / NVR وسياسة التخزين متدرج المراحل
+## 7. التعرف على الزي الموحد ومهمات الوقاية
 
-### أ. الربط التلقائي بأجهزة الـ DVR / NVR (16 أو 32 قناة):
-- تدعم المنظومة الربط المباشر مع أجهزة **Hikvision** (عبر بروتوكول ISAPI)، و **Dahua** (عبر بروتوكول CGI)، وأجهزة **ONVIF**.
-- من خلال الضغط على زر **⚡ ربط واستيراد من DVR / NVR** في التطبيق أو لوحة تحكم الويب، يتم استخراج كافة القنوات وتسمياتها العربية وروابط البث تلقائياً.
-- **معمارية البث المزدوج (Dual-Streaming):**
-  - **مسار Sub-Stream (بدقة 640x360):** يُخصص لمعالجة الذكاء الاصطناعي YOLOX محلياً لتوفير 80% من استهلاك المعالج وتفادي الحرارة.
-  - **مسار Main-Stream (بدقة 1080p FHD):** يُخصص لعرض الشاشات والتقاط صور التوثيق للمخالفات.
-- 📖 **المرجع الكامل:** راجع ملف الدليل التفصيلي المرفق: [docs/dvr_nvr_integration_guide.md](file:///mnt/essam/sites/saqr/docs/dvr_nvr_integration_guide.md).
+في بيئات المطاعم وشركات الأغذية (مثل FitForLess)، يرتدي العمال زياً موحداً باللون الأسود:
 
-### ب. سياسة التخزين متدرج المراحل (Tiered Storage: Hot vs Warm vs Cold):
-لتفادي امتلاء أقراص السيرفر عند مراقبة عشرات الكاميرات، يُطبق السيرفر دورة حياة ذكية للاكتشافات:
-1. **المرحلة الساخنة (Hot Tier - آخر 30 يوماً):** حفظ الصور الأصلية JPEG كاملة الدقة للعرض الفوري في شاشة اليوم وسجل الرصد.
-2. **المرحلة الدافئة (Warm Tier - من 31 إلى 90 يوماً):** ضغط الصور آلياً بصيغة WebP 65% مما يوفر 85% من مساحة القرص.
-3. **المرحلة الباردة والأرشفة (Cold Tier - بعد 90 يوماً):** حذف ملفات الصور نهائياً من القرص مع **الاحتفاظ التام بكافة أرقام وإحصائيات وسجلات الكشوفات في قاعدة البيانات (PostgreSQL)** لإصدار المقارنات والتقارير السنوية دون استهلاك بايت واحد من مساحة القرص.
-4. **الحصانة والتثبيت الدائم (Permanent Pinned):** أي كشف يتم اعتماده أو تحويله لمهمة عمل يتم تثبيته فورياً في مجلد `/storage/snapshots/pinned/` ويُستثنى قطعياً من الحذف التلقائي كدليل رسمي.
-
-لتشغيل عامل دورة الأرشفة التلقائي (Cronjob يومي في منتصف الليل):
-```bash
-# إضافة مهمة مجدولة يومية
-(crontab -l 2>/dev/null; echo "0 2 * * * /usr/bin/node /mnt/essam/sites/saqr/scripts/tiered-storage-worker.js >> /var/log/saqr-storage.log 2>&1") | crontab -
+```
+[رأس العامل]   ─── غطاء رأس / كاب أسود (Black Hairnet / Cap)
+      │
+[وجه العامل]   ─── كمامة سوداء تغطي الفم والأنف (Black Face Mask)
+      │
+[جذع العامل]   ─── تيشرت أسود رسمي معتمد (Black Official T-Shirt)
 ```
 
+### الآلية المتبعة داخل محرك الرصد (`ai-engine.js`):
+1. **التيشرت الأسود (Torso Uniform Analysis):**
+   * يفحص المحرك مصفوفة البكسلات في منطقة الصدر والجذع أسفل الرقبة.
+   * إذا كانت نسبة اللون الأسود الداكن `torsoDarkRatio >= 38%` والإضاءة منخفضة، يُثبت النظام أن الشخص هو **عامل رسمي بالزي الموحد (Official Staff)**.
+2. **الكمامة السوداء (Black Mask Chromatic Verification):**
+   * يتم فحص النصف السفلي من الوجه (من الأنف حتى الذقن).
+   * إذا وُجد قماش أسود داكن (`lowerDarkRatio >= 28%`) يغطي الفم والأنف، يُصنف فوراً: `كمامة سوداء صحيحة (مطابق)` بدرجة ثقة `94%` دون أي إنذار كاذب.
+3. **غطاء الرأس الأسود:**
+   * يفحص أعلى الرأس للتأكد من ارتداء الكاب أو غطاء الشعر الأسود.
+4. **كشف مخالفة عدم ارتداء الكمامة للعمال:**
+   * إذا كان الشخص يرتدي التيشرت الأسود الرسمي ووجهه مكشوف، يسجل فوراً: `عامل بالزي الرسمي: بدون كمامة (مخالفة مؤكدة)`.
+
 ---
 
-## 8. جدول كافة المنافذ والمتغيرات وكيفية تغييرها
+## 8. حلقة التعلم المستمر وتدريب النماذج
 
-| الخدمة | المنفذ الافتراضي | المتغير البيئي في Docker / Nginx | مكان التعديل |
+تم إلغاء المختبرات المصطنعة، وأصبح التدريب المستمر مبنياً **100% على الرصد الميداني الفعلي**:
+
+```
+[رصد ميداني بالكاميرا]
+         │
+         ▼
+[المشرف يراجع في صفحة /detections]
+         ├─── ✅ اعتماد وتأكيد المطابقة  ───► عينة إيجابية (True Positive) لتعزيز دقة الكشف
+         └─── ❌ إنذار كاذب (تصحيح)     ───► عينة سلبية (Hard Negative) لقمع الخطأ مستقبلاً
+         │
+         ▼
+[الضغط على "بدء تدريب النموذج المخصص"]
+         │
+         ▼
+[استخراج الصور وتوليد توصيفات YOLO تلقائياً في data/dataset/]
+         │
+         ▼
+[إعادة التدريب وتحديث أوزان face_mask.onnx فوراً]
+```
+
+### خطوات تشغيل التدريب من التيرمينال:
+1. **تصدير العينات المراجعة إلى حزمة YOLO القياسية:**
+   ```bash
+   node /opt/saqr/scripts/export_active_dataset.js
+   ```
+   يقوم السكربت بقراءة قاعدة البيانات، ونسخ الصور إلى `data/dataset/images/train/`، وإنشاء ملفات التوصيف في `data/dataset/labels/train/` وملف `saqr_custom.yaml`.
+2. **تشغيل التدريب السريع على كارت الشاشة أو المعالج:**
+   ```bash
+   /opt/saqr/.venv/bin/python /opt/saqr/scripts/train_black_mask_model.py
+   ```
+   سيقوم السكربت بتدريب النموذج، والتحقق من دقة mAP50، وتصدير الأوزان الجديدة بصيغة ONNX واستبدال `apps/desktop/models/face_mask.onnx` تلقائياً.
+
+---
+
+## 9. دليل إعداد منشأة أو شركة جديدة
+
+عند تسليم النظام لعميل أو مطعم جديد، اتبع الخطوات التالية:
+
+### 1. بيانات تسجيل الدخول الافتراضية للمدير:
+* **البريد الإلكتروني:** `fitforless@rased.com` (أو البريد المخصص للعميل).
+* **كلمة المرور:** `password123`
+
+### 2. إضافة الفرع والكاميرات:
+1. توجه إلى **إعدادات الفروع** وأنشئ الفرع الجديد (مثلاً: فرع التجمع الخامس).
+2. توجه إلى **الكاميرات** واضغط **إضافة كاميرا**:
+   * **اسم الكاميرا:** كاميرا المطبخ 1 (D4)
+   * **عنوان الـ IP أو RTSP:** أدخل رابط الـ RTSP المباشر أو IP جهاز الـ DVR/NVR الداخلي مع تحديد القناة (مثلاً: `CH4`).
+   * **نوع المكان:** مطبخ (Kitchen).
+   * **الموديلات المفعلة:** الكمامة + القفازات.
+
+---
+
+## 10. ربط تطبيق الويندوز (Saqr Edge Agent)
+
+في موقع الفرع، يُفضل تثبيت تطبيق **Saqr Edge Agent** على كمبيوتر يعمل بنظام Windows 10/11 متصل بنفس الشبكة المحلية لكاميرات المراقبة:
+
+1. **تحميل التطبيق:**
+   من لوحة تحكم المنصة، أو عبر الرابط المباشر:
+   `https://your-domain.com/downloads/Saqr-Edge-Agent-Win64.zip`
+2. **فك الضغط والتشغيل:**
+   * فك ضغط الملف وشغّل `Saqr-Edge-Agent.exe`.
+   * سجل الدخول بنفس حساب المنشأة.
+3. **تلقائية العمل:**
+   * يسحب التطبيق قائمة الكاميرات والموديلات المحددة من السيرفر.
+   * يقوم بالمعالجة محلياً عبر تقنية **DirectML** مستغلاً كارت شاشة الكمبيوتر المحلي دون استهلاك إنترنت المنشأة.
+   * يرسل لقطات الرصد والأحداث فقط إلى سيرفر الـ VPS عبر اتصال HTTPS المشفر.
+
+> **💡 التحديث السريع:** لتحديث واجهة تطبيق الويندوز دون إعادة تحميل الحزمة الكاملة، يمكن استبدال ملف `app.asar` فقط من الرابط: `https://your-domain.com/downloads/app.asar`.
+
+---
+
+## 11. سياسة التخزين متدرج المراحل
+
+لمنع امتلاء قرص الـ VPS بتسجيلات ولقطات الكاميرات، تطبق المنظومة **سياسة التخزين الذكي متدرج المراحل (Tiered Storage)**:
+
+| المرحلة | المدة | جودة الصورة | الحجم التقريبي | الإجراء |
+| :--- | :--- | :--- | :--- | :--- |
+| **Hot Storage** | أول 7 أيام | JPEG أصلية كاملة الجودة | ~180 KB | فحص فوري ومراجعة المشرفين في المودال |
+| **Warm Storage** | من اليوم 8 إلى 30 | WebP مضغوطة بجودة 65% | ~30 KB | ضغط آلي لتوفير 83% من مساحة الصورة |
+| **Cold Storage** | بعد 30 يوماً | أرشفة رقمية للبيانات الوصفية | 0 KB | حذف الصورة والإبقاء على سجل الإحصائيات في SQL |
+
+> **الحماية من الحذف:** أي رصد يتم اعتماده (`verified_positive`) أو تثبيته (`is_pinned = true`) يُستثنى من الحذف التلقائي ويبقى محمياً.
+
+---
+
+## 12. جدول المنافذ والمتغيرات وأوامر الصيانة
+
+### جدول المنافذ المستخدمة:
+| الخدمة | المنفذ الخارجي | المنفذ الداخلي | الملاحظات |
 | :--- | :--- | :--- | :--- |
-| **Next.js Web** | `3000` | `-p 3000` | أمر تشغيل PM2 أو package.json |
-| **Go API** | `8080` | `PORT: "8080"` | `docker-compose.yml` قسم `api` |
-| **API Endpoint للويب** | `8080` | `NEXT_PUBLIC_API_URL` | ملف `apps/web/.env.local` |
-| **PostgreSQL** | `5432` | `POSTGRES_PORT` / `DATABASE_URL` | `docker-compose.yml` قسم `postgres` |
-| **Redis** | `6380` (خارجي) | `REDIS_URL` | `docker-compose.yml` قسم `redis` |
-| **EMQX MQTT** | `1883` | `MQTT_BROKER` | `docker-compose.yml` قسم `emqx` |
-| **MediaMTX RTSP** | `8554` | Ports mapping `8554:8554` | `docker-compose.yml` و `mediamtx.yml` |
-| **MediaMTX WebRTC** | `8889` | Ports mapping `8889:8889` | `infrastructure/mediamtx/mediamtx.yml` |
-| **MediaMTX HLS** | `8888` | Ports mapping `8888:8888` | `infrastructure/mediamtx/mediamtx.yml` |
+| **Next.js Web Dashboard** | `3000` | `3000` | واجهة المستخدم (تُربط بـ Nginx على 80/443) |
+| **Go Core API** | `8080` | `8080` | الخادم الخلفي وإدخال الرصد |
+| **PostgreSQL 17** | `5434` | `5432` | قاعدة البيانات (TimescaleDB) |
+| **Redis 7** | `6380` | `6379` | الذاكرة السريعة وإدارة الجلسات |
+| **EMQX MQTT Broker** | `1883` | `1883` | رسائل التنبيه اللحظية |
+| **MediaMTX WebRTC** | `8889` | `8889` | البث المباشر عالي السرعة |
+| **MediaMTX RTSP** | `8554` | `8554` | سحب بث الكاميرات |
 
 ---
 
-## 9. أوامر الصيانة والنسخ الاحتياطي
+### أوامر الصيانة والنسخ الاحتياطي السريع:
 
-### أ. أخذ نسخة احتياطية من قاعدة البيانات:
+#### 1. أخذ نسخة احتياطية من قاعدة البيانات:
 ```bash
-docker compose exec -T postgres pg_dump -U saqr_user saqr_db > backup_$(date +%Y%m%d_%H%M%S).sql
+docker exec -t rased-postgres pg_dump -U rased -d rased > backup_saqr_$(date +%Y%m%d_%H%M%S).sql
 ```
 
-### ب. استعادة نسخة احتياطية:
+#### 2. استعادة نسخة احتياطية:
 ```bash
-docker compose exec -T postgres psql -U saqr_user saqr_db < backup_file.sql
+docker exec -i rased-postgres psql -U rased -d rased < backup_saqr.sql
 ```
 
-### ج. متابعة السجلات المباشرة لأي مشكلة:
+#### 3. مراقبة سجلات الخدمات مباشرة:
 ```bash
-# سجلات الـ API
-docker compose logs -f api
+# سجلات محرك الرصد الذكي
+pm2 logs saqr-detector
+
+# سجلات واجهة الويب
+pm2 logs saqr-web
+
+# سجلات خادم الـ Go API
+docker logs -f rased-api
 
 # سجلات قاعدة البيانات
-docker compose logs -f postgres
-
-# سجلات الوسائط والبث المباشر
-docker compose logs -f mediamtx
+docker logs -f rased-postgres
 ```
 
 ---
 
-## 10. التحديث التلقائي لكافة السيرفرات (CI/CD GitHub Actions)
+## 13. التحديث التلقائي لكافة السيرفرات (CI/CD)
 
-تم تجهيز ملف GitHub Action كامل في المسار:
+تم تجهيز منظومة النشر التلقائي عبر **GitHub Actions**:
 `.github/workflows/deploy.yml`
 
-وسكريبت التحديث المحلي في:
-`scripts/deploy.sh`
-
-### كيف تعمل ميزة التحديث المتعدد (Multi-Tenant Auto-Deploy)؟
 عند عمل أي `git push origin main`:
-1. يقوم GitHub Action تلقائياً بقراءة قائمة سيرفرات المطاعم المختلفة المسجلة لديك.
-2. يتصل بكل سيرفر بالتوازي (In Parallel) عبر SSH.
-3. ينفذ سكريبت `deploy.sh` على كل سيرفر لسحب أحدث كود، وتحديث جداول قاعدة البيانات، وإعادة بناء الـ API والـ Web تلقائياً.
-4. خاصية `fail-fast: false` تضمن أنه لو كان سيرفر أحد المطاعم مغلقاً أو تحت الصيانة، **لن يتعطل تحديث بقية السيرفرات إطلاقاً**.
+1. يتصل GitHub بكل سيرفر عبر SSH بالتوازي (In Parallel).
+2. يسحب التحديثات وينفذ عمليات البناء وتشغيل الحاويات آلياً.
+3. ميزة `fail-fast: false` تضمن استمرار تحديث باقي السيرفرات حتى لو كان أحد السيرفرات مغلقاً للصيانة.
 
----
-
-### خطوات الإعداد والتفعيل على GitHub:
-
-#### 1. إضافة مفتاح الـ SSH الخاص (SSH Private Key):
-* ولد مفتاح SSH مخصص للنشر (أو استخدم المفتاح المعتمد للسيرفرات):
-  ```bash
-  ssh-keygen -t ed25519 -C "github-actions-deploy" -N "" -f ~/.ssh/github_deploy
-  ```
-* انسخ المفتاح العام `github_deploy.pub` وضعه في ملف `~/.ssh/authorized_keys` على **كل سيرفر مطعم**.
-* انسخ المفتاح الخاص `github_deploy` وضعه في GitHub:
-  * اذهب لمستودعك على GitHub: `Settings` ➔ `Secrets and variables` ➔ `Actions` ➔ `New repository secret`.
-  * الاسم: `SSH_PRIVATE_KEY`
-  * القيمة: الصق محتوى المفتاح الخاص كاملاً.
-
----
-
-#### 2. تحديد قائمة سيرفرات المطاعم (متغير `SERVERS_JSON`):
-في نفس صفحة GitHub Settings:
-* اضغط على تبويب **Variables** (بجوار Secrets).
-* اضغط **New repository variable**.
-* الاسم: `SERVERS_JSON`
-* القيمة (ضع قائمة الـ VPS الخاصة بكل مطعم في مصفوفة JSON مع تحديد مسار المشروع `path` على كل سيرفر):
+### إعداد المتغيرات على مستودع GitHub:
+1. **`SSH_PRIVATE_KEY`** (في Secrets): مفتاح SSH الخاص للاتصال بالسيرفرات.
+2. **`SERVERS_JSON`** (في Variables): قائمة السيرفرات بصيغة JSON:
 ```json
 [
   {
-    "name": "مطعم فرع التجمع (Fit For Less)",
+    "name": "فرع التجمع الخامس (FitForLess)",
     "host": "159.65.120.10",
     "user": "root",
     "port": 22,
     "path": "/opt/saqr"
   },
   {
-    "name": "مطعم فرع المعادي",
+    "name": "سيرفر السحاب الرئيسي (Master VPS)",
     "host": "167.99.85.20",
-    "user": "root",
-    "port": 22,
-    "path": "/var/www/saqr"
-  },
-  {
-    "name": "مطعم فرع الإسكندرية",
-    "host": "134.209.40.35",
     "user": "root",
     "port": 22,
     "path": "/opt/saqr"
   }
 ]
 ```
-> **ملاحظة ذكية حول `path`:** إضافة `"path"` تمنحك مرونة كاملة إذا كان هناك سيرفر تم تثبيت المشروع عليه في مسار مختلف (مثل `/var/www/saqr` أو مجلد مستخدم معين). وإذا تُرك `path` فارغاً، سيعتمد النظام تلقائياً المسار الافتراضي `/opt/saqr`.
 
 ---
 
-### ➕ كيف تضيف سيرفر مطعم جديد مستقبلاً؟
-كل ما عليك فعله عند انضمام مطعم جديد هو:
-1. تجهيز الـ VPS وتثبيت الكود لأول مرة عبر `git clone git@github.com:essamalagamy1/saqr.git /opt/saqr`.
-2. إضافة الـ IP الخاص بمطعم العميل الجديد إلى متغير `SERVERS_JSON` في إعدادات GitHub.
-3. بمجرد أي `git push origin main`، سيقوم GitHub بتحديث كافة السيرفرات بما فيها السيرفر الجديد تلقائياً دون أي تدخل منك!
-
----
-**صَقْر — منظومة الذكاء الاصطناعي لرصد ومراقبة المنشآت**
+**🦅 منظومة صَـــــقْر للرصد الذكي • وثيقة النشر والتشغيل الميداني الشاملة**

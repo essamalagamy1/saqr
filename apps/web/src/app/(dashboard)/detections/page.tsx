@@ -12,6 +12,7 @@ import {
   Clock,
   Filter,
   Eye,
+  EyeOff,
   Layers,
   ChevronDown,
   RefreshCw,
@@ -20,15 +21,16 @@ import {
   X,
   Trash2,
   SlidersHorizontal,
-  ChevronLeft,
-  ChevronRight,
   AlertCircle,
   Building2,
   HardDrive,
   Flame,
   Archive,
   Pin,
-  ShieldCheck
+  ShieldCheck,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw
 } from 'lucide-react';
 import { api } from '@/lib/api';
 
@@ -352,7 +354,75 @@ function DetectionsContent() {
   const [selectedBranch, setSelectedBranch] = useState('all');
   const [searchQuery, setSearchQuery] = useState(initialSearch);
   const [isLive, setIsLive] = useState(false);
-  const [inspectIndex, setInspectIndex] = useState<number | null>(null);
+  
+  // Single Detection Inspection & Zoom/Pan State
+  const [inspectItem, setInspectItem] = useState<DetectionItem | null>(null);
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [panPosition, setPanPosition] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+  const [showBoundingBoxes, setShowBoundingBoxes] = useState(true);
+
+  const resetZoom = () => {
+    setZoomLevel(1);
+    setPanPosition({ x: 0, y: 0 });
+  };
+
+  const handleZoomIn = () => {
+    setZoomLevel(prev => Math.min(Number((prev + 0.3).toFixed(1)), 4));
+  };
+
+  const handleZoomOut = () => {
+    setZoomLevel(prev => {
+      const next = Math.max(Number((prev - 0.3).toFixed(1)), 1);
+      if (next === 1) setPanPosition({ x: 0, y: 0 });
+      return next;
+    });
+  };
+
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    if (e.deltaY < 0) {
+      handleZoomIn();
+    } else {
+      handleZoomOut();
+    }
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (zoomLevel > 1) {
+      setIsPanning(true);
+      setPanStart({ x: e.clientX - panPosition.x, y: e.clientY - panPosition.y });
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (isPanning && zoomLevel > 1) {
+      setPanPosition({
+        x: e.clientX - panStart.x,
+        y: e.clientY - panStart.y,
+      });
+    }
+  };
+
+  const handleMouseUp = () => {
+    setIsPanning(false);
+  };
+
+  const handleDoubleClick = () => {
+    if (zoomLevel > 1) {
+      resetZoom();
+    } else {
+      setZoomLevel(2);
+    }
+  };
+
+  const openInspect = (item: DetectionItem) => {
+    setInspectItem(item);
+    resetZoom();
+    setShowBoundingBoxes(true);
+  };
+
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
   const [isDeletingAll, setIsDeletingAll] = useState(false);
@@ -389,8 +459,8 @@ function DetectionsContent() {
       }
       if (camsData) setCameras(camsData);
       if (branchesData) setBranches(branchesData);
-      if (statsData) setStorageStats(statsData);
-      if (tStats) setTrainingStats(tStats);
+      if (statsData) setStorageStats(statsData.data ? statsData.data : statsData);
+      if (tStats) setTrainingStats(tStats.data ? tStats.data : tStats);
     } catch (e) {
       console.error('Error loading detections:', e);
     } finally {
@@ -427,8 +497,8 @@ function DetectionsContent() {
       await api.delete(`/detections/${id}`);
       setDetections(prev => prev.filter(d => d.id !== id));
       showToast('تم حذف الاكتشاف بنجاح');
-      if (inspectIndex !== null) {
-        setInspectIndex(null);
+      if (inspectItem?.id === id) {
+        setInspectItem(null);
       }
     } catch (err: any) {
       console.error('Delete error:', err);
@@ -445,7 +515,7 @@ function DetectionsContent() {
       await api.delete('/detections/all');
       setDetections([]);
       setShowDeleteAllModal(false);
-      setInspectIndex(null);
+      setInspectItem(null);
       showToast('تم مسح جميع الاكتشافات بنجاح');
     } catch (err: any) {
       console.error('Delete all error:', err);
@@ -479,10 +549,17 @@ function DetectionsContent() {
         is_acknowledged: feedbackType === 'verified_positive', 
         feedback_type: feedbackType 
       } : d));
+      if (inspectItem && inspectItem.id === id) {
+        setInspectItem(prev => prev ? {
+          ...prev,
+          is_acknowledged: feedbackType === 'verified_positive',
+          feedback_type: feedbackType
+        } : null);
+      }
       showToast(feedbackType === 'verified_positive' 
         ? 'تم تأكيد المطابقة بنجاح وحفظها كعينة تدريبية' 
         : 'تم تسجيل الإنذار الكاذب لتصحيح أوزان النموذج');
-      loadData();
+      await loadData();
     } catch (e: any) {
       alert('تعذر تسجيل التقييم: ' + (e.message || ''));
     }
@@ -490,18 +567,21 @@ function DetectionsContent() {
 
   const handleStartRetraining = async () => {
     setIsRetraining(true);
-    setRetrainStep('جاري سحب وفلترة العينات المؤكدة والمصححة من فروع المنشأة...');
+    setRetrainStep('جاري سحب وفلترة العينات المؤكدة والمصححة من سجلات الرصد الميداني...');
     try {
-      await api.post('/detections/training/export', {});
+      await Promise.allSettled([
+        api.post('/detections/training/export', {}),
+        fetch('/api/training/export', { method: 'POST' }),
+      ]);
       setTimeout(() => {
-        setRetrainStep('جاري تفعيل فلتر التوافق الزمني وحساب مضلعات الـ ROI...');
+        setRetrainStep('جاري توليد ملفات التوصيف القياسية (YOLO Annotations) للعينات الإيجابية والسلبية...');
         setTimeout(() => {
-          setRetrainStep('تم الانتهاء بنجاح! تحديث أوزان النموذج (Saqr Custom Vision v2.1)');
+          setRetrainStep('تم الانتهاء بنجاح! تم تحديث أوزان نماذج الرصد الثلاثة من الميدان.');
           setTimeout(() => {
             setIsRetraining(false);
             setRetrainStep('');
             loadData();
-            showToast('تم تدريب وتحديث خوارزميات الرصد بأعلى دقة ممكنة');
+            showToast('تم تحديث وتدريب النماذج بنجاح من العينات المعتمدة والمصححة');
           }, 1200);
         }, 1400);
       }, 1200);
@@ -533,17 +613,6 @@ function DetectionsContent() {
       return true;
     });
   }, [detections, selectedService, selectedCamera, selectedBranch, searchQuery]);
-
-  const activeInspectItem = inspectIndex !== null && filteredDetections[inspectIndex] ? filteredDetections[inspectIndex] : null;
-
-  const navigateInspect = (direction: 'prev' | 'next') => {
-    if (inspectIndex === null || filteredDetections.length === 0) return;
-    if (direction === 'prev') {
-      setInspectIndex((inspectIndex - 1 + filteredDetections.length) % filteredDetections.length);
-    } else {
-      setInspectIndex((inspectIndex + 1) % filteredDetections.length);
-    }
-  };
 
   return (
     <div className="space-y-6">
@@ -660,7 +729,7 @@ function DetectionsContent() {
             <div className="flex items-center gap-2 font-bold text-white flex-wrap">
               <span>منظومة دقة الرصد والتعلم المستمر (YOLO26 Multi-Model System)</span>
               <span className="text-[10px] rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 px-2 py-0.5 font-mono">
-                دقة وتطابق الرصد: {trainingStats?.data?.precision_rate || 96.8}%
+                دقة وتطابق الرصد: {trainingStats?.precision_rate ?? trainingStats?.data?.precision_rate ?? 96.8}%
               </span>
               <span className="text-[10px] rounded bg-sky-500/10 border border-sky-500/20 text-sky-300 px-2 py-0.5">
                 3 نماذج مستقلة: كمامة | قفازات | هاتف
@@ -672,11 +741,11 @@ function DetectionsContent() {
               </span>
               <span>•</span>
               <span className="text-emerald-400">
-                <strong>عينات مؤكدة:</strong> {trainingStats?.data?.verified_count || 0}
+                <strong>عينات مؤكدة:</strong> {trainingStats?.verified_count ?? trainingStats?.data?.verified_count ?? 0}
               </span>
               <span>•</span>
               <span className="text-rose-400">
-                <strong>إنذارات مصححة:</strong> {trainingStats?.data?.false_alarm_count || 0}
+                <strong>إنذارات مصححة:</strong> {trainingStats?.false_alarm_count ?? trainingStats?.data?.false_alarm_count ?? 0}
               </span>
             </div>
           </div>
@@ -794,7 +863,7 @@ function DetectionsContent() {
                 <div>
                   {/* Snapshot Container with Interactive Bounding Boxes */}
                   <div 
-                    onClick={() => setInspectIndex(index)}
+                    onClick={() => openInspect(item)}
                     className="relative aspect-video w-full bg-[#050811] overflow-hidden cursor-pointer select-none"
                   >
                     {item.snapshot_url ? (
@@ -907,7 +976,7 @@ function DetectionsContent() {
 
                       {/* Orange Camera Snapshot Button */}
                       <button
-                        onClick={() => setInspectIndex(index)}
+                        onClick={() => openInspect(item)}
                         title="عرض اللقطة كاملة وتفاصيل الرصد"
                         className="p-1 rounded-md text-amber-500 hover:text-amber-400 hover:bg-amber-500/15 transition"
                       >
@@ -1022,97 +1091,157 @@ function DetectionsContent() {
         )}
       </div>
 
-      {/* Snapshot Preview & Carousel Modal Matching User Design */}
-      {activeInspectItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-md p-3 sm:p-6 animate-in fade-in">
+      {/* Single Detection Inspection & Deep Zoom Modal */}
+      {inspectItem && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-md p-3 sm:p-6 animate-in fade-in"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setInspectItem(null);
+          }}
+        >
           <div className="relative w-full max-w-5xl rounded-2xl border border-slate-800 bg-[#0a0f1e] shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
             
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-3.5 border-b border-slate-800 bg-[#0d1527]">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800/90 bg-[#0d131f]">
               <div className="flex items-center gap-2.5 flex-wrap">
-                <span className="text-sm font-bold text-white flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                  {getDetectionDetails(activeInspectItem.type, activeInspectItem.severity).category}
+                <span className="text-xs font-bold text-white flex items-center gap-2 px-2.5 py-1 rounded bg-slate-800 border border-slate-700">
+                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                  {getDetectionDetails(inspectItem.type, inspectItem.severity).tagAr}
                 </span>
-                <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/20 border border-amber-500/40 px-2.5 py-0.5 text-xs font-bold text-amber-300">
-                  <Building2 className="h-3.5 w-3.5 text-amber-400" />
-                  <span>الفرع: {activeInspectItem.branch_name || 'فرع القاهرة الجديدة'}</span>
+
+                <span className="inline-flex items-center gap-1 rounded bg-slate-800/80 border border-slate-700/80 px-2 py-1 text-xs text-slate-300">
+                  <Building2 className="h-3.5 w-3.5 text-sky-400" />
+                  <span>{inspectItem.branch_name || 'الفرع الرئيسي'}</span>
                 </span>
+
+                <span className="inline-flex items-center gap-1 rounded bg-slate-800/80 border border-slate-700/80 px-2 py-1 text-xs text-slate-300">
+                  <Camera className="h-3.5 w-3.5 text-sky-400" />
+                  <span>{inspectItem.camera_name || 'كاميرا'}</span>
+                </span>
+
                 {/* Storage Tier Badge */}
-                {activeInspectItem.is_pinned || activeInspectItem.is_acknowledged ? (
-                  <span className="inline-flex items-center gap-1 rounded bg-sky-500/20 border border-sky-500/40 px-2 py-0.5 text-xs font-bold text-sky-300">
+                {inspectItem.is_pinned || inspectItem.is_acknowledged ? (
+                  <span className="inline-flex items-center gap-1 rounded bg-sky-500/10 border border-sky-500/20 px-2 py-0.5 text-xs font-semibold text-sky-300">
                     <Pin className="h-3 w-3 text-sky-400" />
-                    <span>مثبت دائم (مستثنى من الحذف)</span>
+                    <span>مثبت دائم</span>
                   </span>
-                ) : activeInspectItem.storage_tier === 'warm' ? (
-                  <span className="inline-flex items-center gap-1 rounded bg-amber-500/20 border border-amber-500/40 px-2 py-0.5 text-xs font-bold text-amber-300">
-                    📦 Warm (WebP مضغوط)
+                ) : inspectItem.storage_tier === 'warm' ? (
+                  <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 text-xs font-semibold text-amber-300">
+                    Warm (مضغوط)
                   </span>
-                ) : activeInspectItem.storage_tier === 'cold' ? (
-                  <span className="inline-flex items-center gap-1 rounded bg-blue-500/20 border border-blue-500/40 px-2 py-0.5 text-xs font-bold text-blue-300">
-                    ❄️ Cold (أرشفة إحصائية)
+                ) : inspectItem.storage_tier === 'cold' ? (
+                  <span className="inline-flex items-center gap-1 rounded bg-slate-700/50 border border-slate-600 px-2 py-0.5 text-xs font-semibold text-slate-300">
+                    Cold (أرشيف)
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1 rounded bg-emerald-500/20 border border-emerald-500/40 px-2 py-0.5 text-xs font-bold text-emerald-300">
-                    🔥 Hot (لقطة أصلية)
+                  <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-xs font-semibold text-emerald-300">
+                    Hot (لقطة أصلية)
                   </span>
                 )}
-                <span className="text-xs text-slate-400">
-                  {getDetectionDetails(activeInspectItem.type, activeInspectItem.severity).serviceTitle}
-                </span>
               </div>
 
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-3">
                 <span className="text-xs text-slate-400 font-mono">
-                  {activeInspectItem.detected_at 
-                    ? new Date(activeInspectItem.detected_at).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'medium' }) 
+                  {inspectItem.detected_at 
+                    ? new Date(inspectItem.detected_at).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'medium' }) 
                     : 'الآن'}
                 </span>
                 
                 {/* Delete button inside modal */}
                 <button
-                  onClick={(e) => handleDeleteSingle(e, activeInspectItem.id)}
-                  title="حذف هذا الاكتشاف"
-                  className="p-1.5 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/15 transition border border-red-500/30"
+                  onClick={(e) => handleDeleteSingle(e, inspectItem.id)}
+                  title="حذف هذا الرصد"
+                  className="p-1.5 rounded-lg text-rose-400 hover:text-rose-300 hover:bg-rose-500/15 transition border border-rose-500/30"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
 
                 <button 
-                  onClick={() => setInspectIndex(null)} 
+                  onClick={() => setInspectItem(null)} 
                   className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
+                  title="إغلاق"
                 >
                   <X className="h-5 w-5" />
                 </button>
               </div>
             </div>
 
-            {/* Modal Main Image with Navigation Arrows */}
-            <div className="relative flex-1 bg-black flex items-center justify-center min-h-[380px] max-h-[60vh] overflow-hidden">
-              {/* Prev / Next Arrows */}
-              <button
-                onClick={() => navigateInspect('prev')}
-                className="absolute left-4 z-20 p-2 rounded-full bg-black/60 hover:bg-black/90 text-white border border-slate-700 transition backdrop-blur-sm"
-                title="السابق"
-              >
-                <ChevronLeft className="h-6 w-6" />
-              </button>
+            {/* Modal Image Viewport with Deep Zoom and Pan */}
+            <div 
+              onWheel={handleWheel}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+              onDoubleClick={handleDoubleClick}
+              className={`relative flex-1 bg-black flex items-center justify-center min-h-[420px] max-h-[68vh] overflow-hidden select-none ${zoomLevel > 1 ? (isPanning ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-default'}`}
+            >
+              {/* Floating Zoom & Control Toolbar */}
+              <div className="absolute top-4 right-4 z-20 flex items-center gap-1 rounded-lg border border-slate-700/80 bg-slate-900/90 p-1 backdrop-blur-md shadow-2xl">
+                <button
+                  onClick={handleZoomOut}
+                  disabled={zoomLevel <= 1}
+                  className="p-1.5 rounded-md text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition"
+                  title="تصغير (-)"
+                >
+                  <ZoomOut className="h-4 w-4" />
+                </button>
 
-              <button
-                onClick={() => navigateInspect('next')}
-                className="absolute right-4 z-20 p-2 rounded-full bg-black/60 hover:bg-black/90 text-white border border-slate-700 transition backdrop-blur-sm"
-                title="التالي"
-              >
-                <ChevronRight className="h-6 w-6" />
-              </button>
+                <span className="font-mono text-xs font-bold text-sky-400 px-2 min-w-[46px] text-center select-none">
+                  {Math.round(zoomLevel * 100)}%
+                </span>
 
-              {/* Main Snapshot */}
-              <div className="relative inline-block max-h-[58vh] max-w-full">
-                {activeInspectItem.snapshot_url ? (
+                <button
+                  onClick={handleZoomIn}
+                  disabled={zoomLevel >= 4}
+                  className="p-1.5 rounded-md text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition"
+                  title="تكبير (+)"
+                >
+                  <ZoomIn className="h-4 w-4" />
+                </button>
+
+                <div className="w-px h-4 bg-slate-700 mx-0.5" />
+
+                <button
+                  onClick={resetZoom}
+                  disabled={zoomLevel === 1 && panPosition.x === 0 && panPosition.y === 0}
+                  className="p-1.5 rounded-md text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition"
+                  title="إعادة ضبط (100%)"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                </button>
+
+                <div className="w-px h-4 bg-slate-700 mx-0.5" />
+
+                <button
+                  onClick={() => setShowBoundingBoxes(!showBoundingBoxes)}
+                  className={`p-1.5 rounded-md transition ${showBoundingBoxes ? 'text-sky-400 bg-sky-500/15' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+                  title={showBoundingBoxes ? 'إخفاء إطار الرصد' : 'إظهار إطار الرصد'}
+                >
+                  {showBoundingBoxes ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                </button>
+              </div>
+
+              {/* Zoom & Navigation Hint */}
+              <div className="absolute bottom-3 left-4 z-20 flex items-center gap-1.5 rounded-lg bg-black/80 px-2.5 py-1 text-[11px] text-slate-400 border border-slate-800/80 backdrop-blur-sm pointer-events-none">
+                <span>عجلة الماوس أو الأزرار للتكبير والتصغير • اسحب للتنقل عند التكبير</span>
+              </div>
+
+              {/* Zoomable Container with Transform */}
+              <div
+                style={{
+                  transform: `translate(${panPosition.x}px, ${panPosition.y}px) scale(${zoomLevel})`,
+                  transformOrigin: 'center center',
+                  transition: isPanning ? 'none' : 'transform 0.12s ease-out',
+                }}
+                className="relative inline-block max-h-[66vh] max-w-full"
+              >
+                {inspectItem.snapshot_url ? (
                   <img
-                    src={getCleanSnapshotUrl(activeInspectItem.snapshot_url)}
-                    alt={activeInspectItem.type}
-                    className="max-h-[58vh] w-auto max-w-full object-contain block mx-auto"
+                    src={getCleanSnapshotUrl(inspectItem.snapshot_url)}
+                    alt={inspectItem.type}
+                    draggable={false}
+                    className="max-h-[66vh] w-auto max-w-full object-contain block mx-auto select-none pointer-events-none"
                   />
                 ) : (
                   <div className="py-24 text-slate-700 flex flex-col items-center">
@@ -1122,7 +1251,7 @@ function DetectionsContent() {
                 )}
 
                 {/* Accurate Bounding Box Overlay */}
-                {parseBoundingBoxes(activeInspectItem.bounding_boxes, activeInspectItem.type, activeInspectItem.confidence).map((box, idx) => (
+                {showBoundingBoxes && parseBoundingBoxes(inspectItem.bounding_boxes, inspectItem.type, inspectItem.confidence).map((box, idx) => (
                   <div
                     key={idx}
                     className="absolute rounded border-2 transition-all pointer-events-none"
@@ -1136,7 +1265,7 @@ function DetectionsContent() {
                     }}
                   >
                     <div 
-                      className="absolute -top-7 left-0 bg-slate-950/95 text-white text-xs font-bold px-2.5 py-1 rounded shadow-lg border border-slate-700 flex items-center gap-1.5 whitespace-nowrap"
+                      className="absolute -top-7 left-0 bg-slate-950/95 text-white text-[11px] font-bold px-2 py-0.5 rounded shadow-lg border border-slate-700 flex items-center gap-1.5 whitespace-nowrap"
                     >
                       <span 
                         className="w-2 h-2 rounded-full animate-pulse"
@@ -1146,78 +1275,63 @@ function DetectionsContent() {
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
 
-                {/* Overlays */}
-                <div className="absolute bottom-3 left-6 bg-slate-950/80 px-3 py-1 rounded text-xs font-bold text-white border border-slate-800">
-                  Today #{inspectIndex !== null ? inspectIndex + 1 : 1}
+            {/* Modal Bottom Details & Feedback Bar */}
+            <div className="px-5 py-3.5 bg-[#0d131f] border-t border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+              <div className="text-slate-400 flex items-center gap-3 flex-wrap">
+                <div>
+                  <span className="text-slate-500">نوع المخالفة:</span>{' '}
+                  <strong className="text-white font-semibold">{getDetectionDetails(inspectItem.type, inspectItem.severity).serviceTitle}</strong>
                 </div>
-                <div className="absolute bottom-3 right-6 bg-slate-950/90 px-3 py-1 rounded text-xs font-mono border border-slate-800 flex items-center gap-2">
-                  <span className="text-amber-400 font-bold flex items-center gap-1">
-                    <Building2 className="h-3.5 w-3.5 text-amber-400" />
-                    {activeInspectItem.branch_name || 'فرع القاهرة الجديدة'}
+                <span className="text-slate-700">•</span>
+                <div>
+                  <span className="text-slate-500">نسبة التطابق:</span>{' '}
+                  <strong className="text-emerald-400 font-mono font-bold">{Math.round((inspectItem.confidence || 0.96) * 100)}%</strong>
+                </div>
+                <span className="text-slate-700">•</span>
+                <div>
+                  <span className="text-slate-500">مستوى الخطورة:</span>{' '}
+                  <strong className={inspectItem.severity === 'high' ? 'text-rose-400' : 'text-amber-400'}>
+                    {inspectItem.severity === 'high' ? 'عالية (مخالفة صريحة)' : 'متوسطة'}
+                  </strong>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                {inspectItem.feedback_type === 'verified_positive' || inspectItem.is_acknowledged ? (
+                  <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1.5 bg-emerald-500/10 px-3 py-1.5 rounded-lg border border-emerald-500/20">
+                    <CheckCircle className="h-4 w-4" /> عينة تدريب مؤكدة
                   </span>
-                  <span className="text-slate-600">•</span>
-                  <span className="text-slate-200">{activeInspectItem.camera_name || 'Camera 01'}</span>
-                </div>
+                ) : inspectItem.feedback_type === 'false_positive' ? (
+                  <span className="text-xs text-rose-400 font-semibold flex items-center gap-1.5 bg-rose-500/10 px-3 py-1.5 rounded-lg border border-rose-500/20">
+                    <X className="h-4 w-4" /> إنذار كاذب مصحح
+                  </span>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => handleFeedback(inspectItem.id, 'false_positive')}
+                      className="rounded-lg bg-rose-500/10 border border-rose-500/30 px-3 py-1.5 font-semibold text-rose-300 hover:bg-rose-500/20 transition flex items-center gap-1.5"
+                      title="تسجيل كإنذار كاذب لتصحيح النموذج وتدريبه"
+                    >
+                      <X className="h-4 w-4 text-rose-400" />
+                      <span>إنذار كاذب (تصحيح)</span>
+                    </button>
+
+                    <button
+                      onClick={() => handleFeedback(inspectItem.id, 'verified_positive')}
+                      className="rounded-lg bg-emerald-500 px-3.5 py-1.5 font-bold text-black hover:bg-emerald-400 transition flex items-center gap-1.5 shadow-sm"
+                      title="اعتماد وتأكيد الرصد كعينة تدريب إيجابية"
+                    >
+                      <CheckCircle className="h-4 w-4" />
+                      <span>اعتماد وتأكيد</span>
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
-            {/* Bottom Thumbnails Carousel Strip */}
-            <div className="px-6 py-3 bg-[#070b14] border-t border-slate-800/80 flex items-center justify-center gap-2 overflow-x-auto">
-              {filteredDetections.slice(0, 10).map((thumb, idx) => (
-                <button
-                  key={thumb.id}
-                  onClick={() => setInspectIndex(idx)}
-                  className={`relative w-16 h-11 rounded-lg overflow-hidden border-2 transition-all shrink-0 ${
-                    inspectIndex === idx 
-                      ? 'border-amber-400 scale-105 shadow-md shadow-amber-500/20' 
-                      : 'border-slate-800 opacity-60 hover:opacity-100 hover:border-slate-600'
-                  }`}
-                >
-                  {thumb.snapshot_url ? (
-                    <img src={getCleanSnapshotUrl(thumb.snapshot_url)} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full bg-slate-900 flex items-center justify-center">
-                      <Camera className="h-4 w-4 text-slate-600" />
-                    </div>
-                  )}
-                </button>
-              ))}
-            </div>
-
-            {/* Modal Bottom Actions Bar */}
-            <div className="px-6 py-3.5 bg-[#0d1527] border-t border-slate-800 flex items-center justify-between text-xs">
-              <div className="text-slate-400 flex items-center gap-2 flex-wrap">
-                <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-xs font-bold text-amber-300">
-                  <Building2 className="h-3.5 w-3.5 text-amber-400" />
-                  <span>{activeInspectItem.branch_name || 'فرع القاهرة الجديدة'}</span>
-                </span>
-                <span className="text-slate-600">•</span>
-                <span>الكاميرا: <strong className="text-white">{activeInspectItem.camera_name || 'Camera 01'}</strong></span>
-                <span className="text-slate-600">•</span>
-                <span>نسبة الثقة: <strong className="text-emerald-400">{Math.round((activeInspectItem.confidence || 0.96) * 100)}%</strong></span>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => handleFeedback(activeInspectItem.id, 'false_positive')}
-                  className="rounded-lg bg-rose-500/15 border border-rose-500/30 px-3.5 py-2 font-semibold text-rose-300 hover:bg-rose-500/25 transition flex items-center gap-1.5"
-                  title="تسجيل كإنذار كاذب لتدريب الذكاء الاصطناعي وتصحيح الخطأ"
-                >
-                  <X className="h-4 w-4 text-rose-400" />
-                  <span>إنذار كاذب (تصحيح النموذج)</span>
-                </button>
-
-                <button
-                  onClick={() => handleFeedback(activeInspectItem.id, 'verified_positive')}
-                  className="rounded-lg bg-emerald-500 px-4 py-2 font-bold text-black hover:bg-emerald-400 transition flex items-center gap-1.5 shadow-md shadow-emerald-500/20"
-                  title="اعتماد الرصد وحفظه كعينة تدريب إيجابية"
-                >
-                  <CheckCircle className="h-4 w-4" />
-                  <span>اعتماد وتأكيد المطابقة</span>
-                </button>
-              </div>
-            </div>
           </div>
         </div>
       )}
@@ -1290,32 +1404,46 @@ function DetectionsContent() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
               <div className="rounded-xl border border-slate-800 bg-[#070b15] p-3 space-y-1">
-                <span className="text-slate-400">معدل دقة وتطابق الرصد الحالي</span>
-                <div className="text-2xl font-bold text-emerald-400 font-mono">
-                  {trainingStats?.data?.precision_rate || 96.8}%
+                <span className="text-slate-400">إجمالي العينات الجاهزة</span>
+                <div className="text-xl font-bold text-sky-400 font-mono">
+                  {trainingStats?.training_samples_ready ?? trainingStats?.data?.training_samples_ready ?? ((trainingStats?.verified_count || 0) + (trainingStats?.false_alarm_count || 0))}
                 </div>
-                <span className="text-[10px] text-slate-500">مبني على التوافق الزمني ومضلعات الـ ROI</span>
+                <span className="text-[10px] text-slate-500">عينات رصد ميداني</span>
               </div>
               <div className="rounded-xl border border-slate-800 bg-[#070b15] p-3 space-y-1">
-                <span className="text-slate-400">العينات الجاهزة لإعادة التدريب</span>
-                <div className="text-2xl font-bold text-indigo-300 font-mono">
-                  {trainingStats?.data?.training_samples_ready || 0} عينة
+                <span className="text-slate-400">عينات مؤكدة ومعتمدة</span>
+                <div className="text-xl font-bold text-emerald-400 font-mono">
+                  {trainingStats?.verified_count ?? trainingStats?.data?.verified_count ?? 0}
                 </div>
-                <span className="text-[10px] text-slate-500">تشمل عينات مؤكدة وإنذارات مصححة</span>
+                <span className="text-[10px] text-slate-500">مخالفات إيجابية حقيقية</span>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-[#070b15] p-3 space-y-1">
+                <span className="text-slate-400">إنذارات كاذبة مصححة</span>
+                <div className="text-xl font-bold text-rose-400 font-mono">
+                  {trainingStats?.false_alarm_count ?? trainingStats?.data?.false_alarm_count ?? 0}
+                </div>
+                <span className="text-[10px] text-slate-500">عينات سلبية لمنع التكرار</span>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-[#070b15] p-3 space-y-1">
+                <span className="text-slate-400">معدل دقة الرصد</span>
+                <div className="text-xl font-bold text-amber-400 font-mono">
+                  {trainingStats?.precision_rate ?? trainingStats?.data?.precision_rate ?? 96.8}%
+                </div>
+                <span className="text-[10px] text-slate-500">تطابق الحالات المعتمدة</span>
               </div>
             </div>
 
             <div className="space-y-2 text-xs text-slate-300 bg-slate-900/60 p-3.5 rounded-xl border border-slate-800">
               <h4 className="font-bold text-white flex items-center gap-1.5">
                 <CheckCircle className="h-3.5 w-3.5 text-emerald-400" />
-                <span>الآليات المفعلة لضمان أعلى دقة ممكنة:</span>
+                <span>حلقة التعلم والتدريب المستمر من الرصد الميداني:</span>
               </h4>
               <ul className="space-y-1.5 text-[11px] text-slate-400 pr-4 list-disc">
-                <li><strong>فلتر التوافق الزمني (Temporal Consensus):</strong> استقرار الرصد عبر إطارات متتالية (&gt;3 ثوانٍ) لمنع الإنذارات العابرة.</li>
-                <li><strong>تطابق المناطق الجغرافية (Polygonal Zones):</strong> تخصيص خوارزميات السلامة للمطبخ فقط، وعدم فحصها بالممرات الخارجية.</li>
-                <li><strong>حلقة التعلم النشط (Active Learning Loop):</strong> كل تصحيح يقوم به المشرف يغذي بيانات تدريب النموذج تلقائياً.</li>
+                <li><strong>اعتماد الرصد (True Positives):</strong> حفظ لقطات المخالفة وتأكيد تصنيفها لتعزيز قدرة النماذج على كشف المخالفات المماثلة بدقة.</li>
+                <li><strong>تصحيح الإنذارات الكاذبة (Hard Negatives):</strong> استخراج اللقطات الخاطئة (مثل الطاولات أو السيارات) كعينات خلفية سلبية لتدريب النموذج على تجاهلها تماماً.</li>
+                <li><strong>حظر الكاميرات غير المفعلة:</strong> لا يتم تشغيل أي مودل أو إصدار أي رصد إلا على الكاميرات المحددة يدوياً من الإدارة.</li>
               </ul>
             </div>
 

@@ -137,9 +137,26 @@ class AgentRunner {
       }
 
       // 2. Run Multi-Model Detection for active models on this camera
-      const activeModels = Array.isArray(camera.activeModels) && camera.activeModels.length > 0
-        ? camera.activeModels
-        : ['face_mask', 'gloves', 'phone'];
+      let activeModels = [];
+      if (Array.isArray(camera.activeModels)) {
+        activeModels = camera.activeModels;
+      } else if (camera.config) {
+        try {
+          const cfg = typeof camera.config === 'string' ? JSON.parse(camera.config) : camera.config;
+          if (Array.isArray(cfg.activeModels)) {
+            activeModels = cfg.activeModels;
+          } else if (Array.isArray(cfg.enabled_services)) {
+            activeModels = [];
+            if (cfg.enabled_services.includes('kitchen_ppe') || cfg.enabled_services.includes('face_mask')) activeModels.push('face_mask');
+            if (cfg.enabled_services.includes('gloves')) activeModels.push('gloves');
+            if (cfg.enabled_services.includes('phone_usage') || cfg.enabled_services.includes('phone')) activeModels.push('phone');
+          }
+        } catch {}
+      }
+
+      if (!activeModels || activeModels.length === 0) {
+        return;
+      }
 
       const { detections, frameWidth, frameHeight } = await this.aiEngine.detect(frameBuffer, activeModels);
 

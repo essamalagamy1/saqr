@@ -8,7 +8,7 @@
 class DetectionPipeline {
   constructor() {
     this.lastAlerts = new Map(); // `${camId}_${violationType}` -> timestamp
-    this.defaultCooldownMs = 90000; // 90 seconds between alerts for the same violation on the same camera
+    this.defaultCooldownMs = 15000; // 15 seconds default cooldown between alerts
   }
 
   toPercentBox(box, label, color, score, frameWidth, frameHeight) {
@@ -34,8 +34,11 @@ class DetectionPipeline {
   evaluateDetections(camera, detections, now, fw = 1280, fh = 720) {
     if (!detections || detections.length === 0) return [];
 
-    const activeModels = camera.activeModels || ['face_mask', 'gloves', 'phone'];
+    const activeModels = camera.activeModels || [];
+    if (activeModels.length === 0) return [];
+
     const candidates = [];
+    const cooldown = (camera.cooldown_seconds ? camera.cooldown_seconds * 1000 : this.defaultCooldownMs);
 
     // 1. Check Face Mask Violations (NO_MASK or INCORRECT_MASK)
     if (activeModels.includes('face_mask')) {
@@ -45,7 +48,7 @@ class DetectionPipeline {
         const alertKey = `${camera.id}_face_mask_${topViolation.status}`;
         const lastAlert = this.lastAlerts.get(alertKey) || 0;
 
-        if (now - lastAlert >= this.defaultCooldownMs) {
+        if (now - lastAlert >= cooldown) {
           this.lastAlerts.set(alertKey, now);
 
           const typeName = topViolation.status === 'NO_MASK'
@@ -79,7 +82,7 @@ class DetectionPipeline {
         const alertKey = `${camera.id}_gloves_bare_hand`;
         const lastAlert = this.lastAlerts.get(alertKey) || 0;
 
-        if (now - lastAlert >= this.defaultCooldownMs) {
+        if (now - lastAlert >= cooldown) {
           this.lastAlerts.set(alertKey, now);
 
           candidates.push({
@@ -109,7 +112,7 @@ class DetectionPipeline {
         const alertKey = `${camera.id}_phone_usage`;
         const lastAlert = this.lastAlerts.get(alertKey) || 0;
 
-        if (now - lastAlert >= this.defaultCooldownMs) {
+        if (now - lastAlert >= cooldown) {
           this.lastAlerts.set(alertKey, now);
 
           candidates.push({

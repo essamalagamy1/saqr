@@ -85,7 +85,6 @@ if [ -n "$TUNNEL_URL" ]; then
     echo "🎉 تم إنشاء وتشغيل نفق صقر السحابي بنجاح!"
     echo "========================================================================"
     echo "🌐 رابط المنصة الرئيسي:   $TUNNEL_URL"
-    echo "🦺 مختبر فحص مهمات الوقاية: $TUNNEL_URL/ppe-test"
     echo "📸 صفحة الكاميرات المباشرة: $TUNNEL_URL/cameras"
     echo "📥 تحميل تطبيق الويندوز:   $TUNNEL_URL/downloads/Saqr-Edge-Agent-Win64.zip"
     echo "📦 التحديث السريع للتطبيق:  $TUNNEL_URL/downloads/app.asar"

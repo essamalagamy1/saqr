@@ -115,29 +115,24 @@ export default function CamerasPage() {
     );
 
     setCurrentRole(role);
-    if (Array.isArray(parsed.enabled_services) && parsed.enabled_services.length > 0) {
+    if (Array.isArray(parsed.enabled_services)) {
       setEnabledServices(parsed.enabled_services);
-    } else if (role === 'kitchen') {
-      setEnabledServices(['kitchen_ppe', 'phone_usage']);
-    } else if (role === 'entrance') {
-      setEnabledServices(['visitor_counting', 'employee_monitoring']);
+    } else if (Array.isArray(parsed.activeModels)) {
+      setEnabledServices(parsed.activeModels);
     } else {
-      setEnabledServices(['employee_monitoring']);
+      setEnabledServices([]);
     }
-    setCooldownSec(parsed.cooldown_seconds || (role === 'kitchen' ? 180 : 60));
+    setCooldownSec(parsed.cooldown_seconds || 60);
     setSelectedCamForAi(cam);
   };
 
   const applyPresetRole = (role: 'kitchen' | 'entrance' | 'lobby' | 'warehouse' | 'general') => {
     setCurrentRole(role);
     if (role === 'kitchen') {
-      setEnabledServices(['kitchen_ppe', 'gloves', 'phone_usage']);
+      setEnabledServices(['kitchen_ppe', 'gloves']);
       setCooldownSec(120);
-    } else if (role === 'general') {
-      setEnabledServices(['kitchen_ppe', 'gloves', 'phone_usage']);
-      setCooldownSec(90);
     } else {
-      setEnabledServices(['phone_usage']);
+      setEnabledServices([]);
       setCooldownSec(60);
     }
   };
@@ -152,9 +147,15 @@ export default function CamerasPage() {
     if (!selectedCamForAi) return;
     setSavingAiConfig(true);
     try {
+      const activeModels: string[] = [];
+      if (enabledServices.includes('kitchen_ppe') || enabledServices.includes('face_mask')) activeModels.push('face_mask');
+      if (enabledServices.includes('gloves')) activeModels.push('gloves');
+      if (enabledServices.includes('phone_usage') || enabledServices.includes('phone')) activeModels.push('phone');
+
       const configPayload = {
         role: currentRole,
         enabled_services: enabledServices,
+        activeModels,
         cooldown_seconds: cooldownSec,
       };
       await api.patch(`/cameras/${selectedCamForAi.id}/config`, { config: configPayload });
@@ -177,7 +178,7 @@ export default function CamerasPage() {
       parsed = typeof cam.config === 'string' ? JSON.parse(cam.config) : (cam.config || {});
     } catch {}
 
-    const svcs: string[] = Array.isArray(parsed.enabled_services) ? parsed.enabled_services : ['kitchen_ppe', 'gloves', 'phone_usage'];
+    const svcs: string[] = Array.isArray(parsed.enabled_services) ? parsed.enabled_services : (Array.isArray(parsed.activeModels) ? parsed.activeModels : []);
     const hasMask = svcs.includes('kitchen_ppe') || svcs.includes('face_mask');
     const hasGloves = svcs.includes('gloves');
     const hasPhone = svcs.includes('phone_usage') || svcs.includes('phone');

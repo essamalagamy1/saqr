@@ -221,15 +221,15 @@ func (h *Handler) Ingest(c *fiber.Ctx) error {
 
 	// 2. Intelligent Anti-Spam / Deduplication Check
 	// Prevent duplicate alerts on the same camera for the same violation type within cooldown windows
-	var duplicateCooldownSeconds int = 60 // Default 60 seconds cooldown for identical alerts
+	var duplicateCooldownSeconds int = 15 // 15 seconds cooldown for responsive real-time detection
 	if strings.Contains(req.Type, "تسكع") || strings.Contains(strings.ToLower(req.Type), "loiter") {
-		duplicateCooldownSeconds = 300 // 5 minutes cooldown for Loitering
+		duplicateCooldownSeconds = 60
 	} else if strings.Contains(req.Type, "Person detected") || strings.Contains(req.Type, "أشخاص") {
-		duplicateCooldownSeconds = 180 // 3 minutes cooldown for generic presence
+		duplicateCooldownSeconds = 30
 	} else if strings.Contains(req.Type, "جوال") || strings.Contains(strings.ToLower(req.Type), "phone") {
-		duplicateCooldownSeconds = 180 // 3 minutes cooldown for phone usage
-	} else if strings.Contains(req.Type, "كمامة") || strings.Contains(req.Type, "غطاء") || strings.Contains(strings.ToLower(req.Type), "ppe") || strings.Contains(strings.ToLower(req.Type), "mask") {
-		duplicateCooldownSeconds = 180 // 3 minutes cooldown for PPE violations
+		duplicateCooldownSeconds = 15
+	} else if strings.Contains(req.Type, "كمامة") || strings.Contains(req.Type, "قفاز") || strings.Contains(req.Type, "يد") || strings.Contains(strings.ToLower(req.Type), "ppe") || strings.Contains(strings.ToLower(req.Type), "mask") {
+		duplicateCooldownSeconds = 15
 	}
 
 	var existingRecentID string

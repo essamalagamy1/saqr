@@ -140,19 +140,16 @@ func (h *Handler) Create(c *fiber.Ctx) error {
 		chanUpper := strings.ToUpper(req.DvrChannel)
 		isKitchen := strings.Contains(nameLower, "مطبخ") || strings.Contains(nameLower, "kitchen") ||
 			chanUpper == "CH3" || chanUpper == "CH4" || chanUpper == "CH8" || chanUpper == "D8"
-		isEntrance := strings.Contains(nameLower, "مدخل") || strings.Contains(nameLower, "بوابة") ||
-			strings.Contains(nameLower, "entrance") || chanUpper == "CH1" || chanUpper == "CH2" || chanUpper == "D1" || chanUpper == "D2"
 
 		defaultCfg := map[string]interface{}{}
 		if isKitchen {
 			defaultCfg["role"] = "kitchen"
-			defaultCfg["enabled_services"] = []string{"kitchen_ppe", "phone_usage"}
-		} else if isEntrance {
-			defaultCfg["role"] = "entrance"
-			defaultCfg["enabled_services"] = []string{"visitor_counting", "employee_monitoring"}
+			defaultCfg["enabled_services"] = []string{"kitchen_ppe", "gloves"}
+			defaultCfg["activeModels"] = []string{"face_mask", "gloves"}
 		} else {
 			defaultCfg["role"] = "general"
-			defaultCfg["enabled_services"] = []string{"employee_monitoring"}
+			defaultCfg["enabled_services"] = []string{}
+			defaultCfg["activeModels"] = []string{}
 		}
 		configJSON, _ = json.Marshal(defaultCfg)
 	}

@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
   const now = Date.now();
   const details: Record<string, { ageSeconds: number; sizeBytes: number }> = {};
   if (global.cameraLiveFrames) {
-    for (const [key, val] of global.cameraLiveFrames.entries()) {
+    for (const [key, val] of Array.from(global.cameraLiveFrames.entries())) {
       details[key] = {
         ageSeconds: Math.round((now - (val.updatedAt || 0)) / 1000),
         sizeBytes: val.buffer?.length || 0,
