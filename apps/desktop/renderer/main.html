@@ -96,7 +96,7 @@
           <div>
             <h2>مراقبة الشبكة المحلية</h2>
             <p class="page-subtitle">
-              معالجة بث الكاميرات محلياً بنموذج YOLOX مع ترحيل الأحداث للخادم السحابي
+              معالجة بث الكاميرات محلياً بنماذج YOLO26 (الكمامة، القفازات، الهاتف) مع إمكانية تشغيل أكثر من نموذج في نفس اللحظة
             </p>
           </div>
           <div class="agent-control">
@@ -337,7 +337,7 @@
 
         <!-- Detection Settings -->
         <div class="settings-section">
-          <h3>محرك الذكاء الاصطناعي (YOLOX Inference)</h3>
+          <h3>محرك الذكاء الاصطناعي (YOLO26 Multi-Model Inference)</h3>
           <div class="form-group">
             <label for="settingsInterval">معدل التقاط الإطارات (ثانية لكل كاميرا)</label>
             <input type="number" id="settingsInterval" min="1" max="60" value="3" style="max-width: 150px;">
@@ -413,6 +413,23 @@
             <option value="">جاري تحميل الفروع من حسابك...</option>
           </select>
           <small class="form-hint">اختر الفرع المسجل على حسابك الذي تتبع له هذه الكاميرا</small>
+        </div>
+        <div class="form-group">
+          <label>نماذج الرصد النشطة على الكاميرا (يمكن اختيار أكثر من نموذج معاً)</label>
+          <div style="display: flex; gap: 12px; margin-top: 6px; flex-wrap: wrap;">
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; color: var(--text-primary);">
+              <input type="checkbox" id="addModelMask" checked style="accent-color: #f43f5e;">
+              <span>😷 كشف ارتداء الكمامة</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; color: var(--text-primary);">
+              <input type="checkbox" id="addModelGloves" checked style="accent-color: #10b981;">
+              <span>🧤 كشف القفازات والأيدي</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; color: var(--text-primary);">
+              <input type="checkbox" id="addModelPhone" checked style="accent-color: #a855f7;">
+              <span>📱 كشف استخدام الهاتف</span>
+            </label>
+          </div>
         </div>
         <div id="cameraTestResult" style="display:none"></div>
       </div>

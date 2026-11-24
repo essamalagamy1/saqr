@@ -228,31 +228,36 @@ export default function AnalyticsPage() {
   return (
     <div className="space-y-6">
       {/* Page Title & Controls */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-slate-800/80 pb-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-slate-800/80 pb-4">
         <div>
-          <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-            <TrendingUp className="h-5 w-5 text-amber-500" />
-            <span>التحليلات المتقدمة والتقارير التنفيذية</span>
-          </h1>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-lg sm:text-xl font-bold tracking-tight text-white flex items-center gap-2">
+              <TrendingUp className="h-5 w-5 text-sky-400" />
+              <span>التحليلات المتقدمة ومعدلات الامتثال</span>
+            </h1>
+            <span className="font-mono text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+              YOLO26
+            </span>
+          </div>
           <p className="mt-1 text-xs text-slate-400">
-            تحليل حركة الزوار، مؤشرات الامتثال، ومعدلات الأداء المستخلصة من الكاميرات الفعلية
+            مؤشرات أداء الرصد البصري، نسب ارتداء الكمامة والقفازات، ومعدلات استخدام الهاتف
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           {/* Camera Filter Selector */}
-          <div className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-[#0d1527] px-2.5 py-1 text-xs">
-            <Camera className="h-3.5 w-3.5 text-amber-500" />
+          <div className="flex items-center gap-1.5 rounded-md border border-slate-800 bg-[#0d131f] px-2.5 py-1 text-xs">
+            <Camera className="h-3.5 w-3.5 text-slate-400" />
             <select
               value={selectedCameraId}
               onChange={(e) => setSelectedCameraId(e.target.value)}
               className="bg-transparent text-slate-200 text-xs focus:outline-none cursor-pointer"
             >
-              <option value="all" className="bg-[#0d1527] text-white">
+              <option value="all" className="bg-[#0d131f] text-white">
                 كافة الكاميرات ({cameras.length})
               </option>
               {cameras.map((c) => (
-                <option key={c.id} value={c.id} className="bg-[#0d1527] text-white">
+                <option key={c.id} value={c.id} className="bg-[#0d131f] text-white">
                   {c.name} {c.dvr_channel ? `(${c.dvr_channel})` : ''}
                 </option>
               ))}
@@ -260,27 +265,27 @@ export default function AnalyticsPage() {
           </div>
 
           {/* Period selector */}
-          <div className="flex rounded-lg border border-slate-800 bg-[#0d1527] p-0.5 text-xs">
+          <div className="flex rounded-md border border-slate-800 bg-[#0d131f] p-0.5 text-xs">
             <button
               onClick={() => setPeriod('today')}
-              className={`rounded-md px-3 py-1 font-semibold transition ${
-                period === 'today' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+              className={`rounded px-3 py-1 font-medium transition ${
+                period === 'today' ? 'bg-sky-600 text-white font-semibold' : 'text-slate-400 hover:text-white'
               }`}
             >
               اليوم
             </button>
             <button
               onClick={() => setPeriod('7d')}
-              className={`rounded-md px-3 py-1 font-semibold transition ${
-                period === '7d' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+              className={`rounded px-3 py-1 font-medium transition ${
+                period === '7d' ? 'bg-sky-600 text-white font-semibold' : 'text-slate-400 hover:text-white'
               }`}
             >
               آخر 7 أيام
             </button>
             <button
               onClick={() => setPeriod('30d')}
-              className={`rounded-md px-3 py-1 font-semibold transition ${
-                period === '30d' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+              className={`rounded px-3 py-1 font-medium transition ${
+                period === '30d' ? 'bg-sky-600 text-white font-semibold' : 'text-slate-400 hover:text-white'
               }`}
             >
               هذا الشهر
@@ -291,9 +296,9 @@ export default function AnalyticsPage() {
           <button
             onClick={loadData}
             title="تحديث البيانات"
-            className="flex items-center gap-1 rounded-lg border border-slate-800 bg-[#0d1527] px-2.5 py-1.5 text-xs text-slate-300 hover:text-white hover:border-slate-700 transition"
+            className="flex items-center gap-1 rounded-md border border-slate-800 bg-[#0d131f] px-2.5 py-1.5 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition"
           >
-            <RefreshCw className={`h-3.5 w-3.5 text-amber-500 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-3.5 w-3.5 text-slate-400 ${loading ? 'animate-spin' : ''}`} />
           </button>
 
           {/* Export CSV */}

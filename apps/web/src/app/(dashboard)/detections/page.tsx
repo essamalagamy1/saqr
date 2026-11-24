@@ -15,7 +15,6 @@ import {
   Layers,
   ChevronDown,
   RefreshCw,
-  PlusCircle,
   Check,
   Loader2,
   X,
@@ -353,7 +352,6 @@ function DetectionsContent() {
   const [selectedBranch, setSelectedBranch] = useState('all');
   const [searchQuery, setSearchQuery] = useState(initialSearch);
   const [isLive, setIsLive] = useState(false);
-  const [taskSuccessId, setTaskSuccessId] = useState<string | null>(null);
   const [inspectIndex, setInspectIndex] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
@@ -514,35 +512,12 @@ function DetectionsContent() {
     }
   };
 
-  const handleConvertToTask = async (item: DetectionItem) => {
-    try {
-      await api.post('/tasks/', {
-        branch_id: item.branch_id || (branches[0]?.id || '07c23347-85da-4b22-8c23-1b3a76c6713f'),
-        detection_id: item.id,
-        title: `متابعة مخالفة: ${item.type}`,
-        description: `رصد آلي في ${item.camera_name || 'الكاميرا'} بنسبة ثقة ${Math.round(item.confidence * 100)}%`,
-        priority: item.severity === 'high' ? 'high' : 'medium',
-        assigned_to: 'مشرف الوردية'
-      });
-      setTaskSuccessId(item.id);
-      showToast('تم تحويل الرصد إلى مهمة متابعة');
-      setTimeout(() => setTaskSuccessId(null), 3000);
-    } catch (e) {
-      console.error(e);
-      alert('تعذر تحويل الرصد إلى مهمة');
-    }
-  };
-
   const filteredDetections = useMemo(() => {
     return detections.filter(d => {
       const t = (d.type || '').toLowerCase();
-      if (selectedService === 'ppe' && !(t.includes('قفاز') || t.includes('غطاء') || t.includes('hairnet') || t.includes('mask') || t.includes('كمامة'))) return false;
-      if (selectedService === 'visitor' && !(t.includes('زائر') || t.includes('visitor') || t.includes('دخول') || t.includes('خروج') || t.includes('توافد'))) return false;
-      if (selectedService === 'loitering' && !(t.includes('تسكع') || t.includes('loitering') || t.includes('lingering'))) return false;
+      if (selectedService === 'mask' && !(t.includes('mask') || t.includes('كمامة') || t.includes('كمام'))) return false;
+      if (selectedService === 'gloves' && !(t.includes('glove') || t.includes('قفاز') || t.includes('قفازات') || t.includes('bare_hand'))) return false;
       if (selectedService === 'phone' && !(t.includes('phone') || t.includes('هاتف') || t.includes('جوال'))) return false;
-      if (selectedService === 'queue' && !(t.includes('queue') || t.includes('طابور') || t.includes('انتظار'))) return false;
-      if (selectedService === 'employee' && !(t.includes('employee') || t.includes('staff') || t.includes('موظف'))) return false;
-      if (selectedService === 'presence' && !(t.includes('person') || t.includes('شخص') || t.includes('أشخاص'))) return false;
 
       if (selectedCamera !== 'all' && d.camera_name !== selectedCamera) return false;
       if (selectedBranch !== 'all' && d.branch_name !== selectedBranch) return false;
@@ -581,14 +556,19 @@ function DetectionsContent() {
       )}
 
       {/* Page Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800/80 pb-4">
         <div>
-          <h1 className="text-xl font-bold text-white flex items-center gap-2">
-            <AlertTriangle className="h-5 w-5 text-amber-500" />
-            سجل الاكتشافات الموحد
-          </h1>
-          <p className="text-xs text-slate-400 mt-0.5">
-            سجل الرصد الموحد لجميع المخالفات وأحداث الذكاء الاصطناعي مع التوثيق المصور
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-lg sm:text-xl font-bold tracking-tight text-white flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-sky-400" />
+              سجل المخالفات والأحداث الميدانية
+            </h1>
+            <span className="font-mono text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+              {filteredDetections.length} حدث
+            </span>
+          </div>
+          <p className="text-xs text-slate-400 mt-1">
+            سجل موثق بالصور والإحداثيات لنتائج نماذج YOLO26 (الكمامة، القفازات، الهاتف)
           </p>
         </div>
 
@@ -598,25 +578,20 @@ function DetectionsContent() {
             onClick={() => setShowDeleteAllModal(true)}
             disabled={detections.length === 0}
             title="حذف جميع الاكتشافات من قاعدة البيانات"
-            className="flex items-center gap-1.5 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-400 hover:bg-red-500/20 hover:text-red-300 disabled:opacity-40 disabled:pointer-events-none transition shadow-sm"
+            className="flex items-center gap-1.5 rounded-md border border-red-500/20 bg-red-500/5 px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500/10 disabled:opacity-40 disabled:pointer-events-none transition"
           >
-            <Trash2 className="h-4 w-4 text-red-500" />
-            <span>حذف جميع الاكتشافات</span>
+            <Trash2 className="h-3.5 w-3.5" />
+            <span>مسح السجل</span>
           </button>
 
           {/* Refresh Button */}
           <button 
             onClick={loadData} 
-            title="تحديث القائمة"
-            className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/60 p-2 text-slate-400 hover:text-white transition"
+            title="تحديث السجل"
+            className="flex items-center gap-1.5 rounded-md border border-slate-800 bg-slate-900/60 p-2 text-slate-400 hover:text-white transition"
           >
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin text-amber-400' : ''}`} />
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin text-sky-400' : ''}`} />
           </button>
-
-          {/* Count Badge */}
-          <span className="rounded-full bg-amber-500/10 px-3 py-1.5 text-xs font-bold text-amber-400 border border-amber-500/20">
-            {filteredDetections.length} نتيجة مسجلة {isLive ? '(محدث لحظياً)' : ''}
-          </span>
         </div>
       </div>
 
@@ -651,7 +626,7 @@ function DetectionsContent() {
               <span>•</span>
               <span className="inline-flex items-center gap-1 text-sky-300">
                 <Pin className="h-3 w-3" />
-                <strong>المستثنى من الحذف:</strong> مهام العمل والمخالفات المعتمدة
+                <strong>المستثنى من الحذف:</strong> المخالفات المعتمدة والمؤكدة
               </span>
             </div>
           </div>
@@ -676,36 +651,32 @@ function DetectionsContent() {
       </div>
 
       {/* AI Precision & Active Learning Pipeline Banner */}
-      <div className="rounded-xl border border-indigo-500/30 bg-gradient-to-r from-[#0e172e] via-[#0b1226] to-[#0e172e] p-3.5 flex flex-col md:flex-row items-center justify-between gap-3 text-xs shadow-lg">
+      <div className="rounded-xl border border-slate-800 bg-[#0d131f] p-3.5 flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 flex items-center justify-center shrink-0">
-            <ShieldCheck className="h-5 w-5 text-indigo-400" />
+          <div className="w-9 h-9 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-400 flex items-center justify-center shrink-0">
+            <ShieldCheck className="h-5 w-5 text-sky-400" />
           </div>
           <div>
             <div className="flex items-center gap-2 font-bold text-white flex-wrap">
-              <span>منظومة دقة الرصد والتعلم المستمر (Precision & Active Learning Hub)</span>
-              <span className="text-[10px] rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 px-2 py-0.5 font-mono">
+              <span>منظومة دقة الرصد والتعلم المستمر (YOLO26 Multi-Model System)</span>
+              <span className="text-[10px] rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 px-2 py-0.5 font-mono">
                 دقة وتطابق الرصد: {trainingStats?.data?.precision_rate || 96.8}%
               </span>
-              <span className="text-[10px] rounded-full bg-purple-500/15 border border-purple-500/30 text-purple-300 px-2 py-0.5">
-                فلتر التوافق الزمني (Temporal Consensus) مفعّل
+              <span className="text-[10px] rounded bg-sky-500/10 border border-sky-500/20 text-sky-300 px-2 py-0.5">
+                3 نماذج مستقلة: كمامة | قفازات | هاتف
               </span>
             </div>
             <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5 flex-wrap">
               <span className="text-slate-300">
-                <strong>النموذج النشط:</strong> {trainingStats?.data?.active_model || 'YOLOX-S Custom Precision (Saqr-v2)'}
+                <strong>النماذج النشطة:</strong> YOLO26 (Mask, Gloves, Phone)
               </span>
               <span>•</span>
               <span className="text-emerald-400">
-                <strong>عينات مطابقة مؤكدة:</strong> {trainingStats?.data?.verified_count || 0}
+                <strong>عينات مؤكدة:</strong> {trainingStats?.data?.verified_count || 0}
               </span>
               <span>•</span>
               <span className="text-rose-400">
-                <strong>إنذارات خاطئة مصححة:</strong> {trainingStats?.data?.false_alarm_count || 0}
-              </span>
-              <span>•</span>
-              <span className="text-sky-300">
-                <strong>تطابق المناطق (Zones):</strong> مفعل على 12 منطقة جغرافية
+                <strong>إنذارات مصححة:</strong> {trainingStats?.data?.false_alarm_count || 0}
               </span>
             </div>
           </div>
@@ -714,24 +685,24 @@ function DetectionsContent() {
         <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={() => setShowTrainingModal(true)}
-            className="flex items-center gap-1.5 rounded-lg border border-indigo-500/40 bg-indigo-600/20 px-3.5 py-1.5 text-xs font-bold text-indigo-200 hover:text-white hover:bg-indigo-600/30 transition shadow-sm"
+            className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3.5 py-1.5 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-700 transition"
             title="فتح مركز تدريب وتطوير النماذج"
           >
-            <SlidersHorizontal className="h-3.5 w-3.5 text-indigo-400" />
+            <SlidersHorizontal className="h-3.5 w-3.5 text-sky-400" />
             <span>مركز تدريب النماذج</span>
           </button>
         </div>
       </div>
 
       {/* Advanced Filter Box */}
-      <div className="rounded-xl border border-slate-800/80 bg-[#0d1527] p-4 space-y-4">
+      <div className="rounded-xl border border-slate-800 bg-[#0d131f] p-4 space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
           <div>
             <label className="block text-[11px] font-semibold text-slate-400 mb-1">الفرع</label>
             <select 
               value={selectedBranch}
               onChange={(e) => setSelectedBranch(e.target.value)}
-              className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-slate-200 focus:outline-none focus:border-amber-500"
+              className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
             >
               <option value="all">جميع الفروع</option>
               {branches.map(b => (
@@ -745,7 +716,7 @@ function DetectionsContent() {
             <select 
               value={selectedCamera}
               onChange={(e) => setSelectedCamera(e.target.value)}
-              className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-slate-200 focus:outline-none focus:border-amber-500"
+              className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
             >
               <option value="all">جميع الكاميرات (All Cameras)</option>
               {cameras.map(c => (
@@ -755,20 +726,16 @@ function DetectionsContent() {
           </div>
 
           <div>
-            <label className="block text-[11px] font-semibold text-slate-400 mb-1">نوع الخدمة</label>
+            <label className="block text-[11px] font-semibold text-slate-400 mb-1">نموذج الذكاء الاصطناعي</label>
             <select
               value={selectedService}
               onChange={(e) => setSelectedService(e.target.value)}
-              className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-slate-200 focus:outline-none focus:border-amber-500"
+              className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
             >
-              <option value="all">الكل (جميع الخدمات)</option>
-              <option value="ppe">سلامة المطبخ (PPE - كمامات وغطاء)</option>
-              <option value="visitor">عد الزوار (Foot Traffic - دخول/خروج)</option>
-              <option value="phone">كشف استخدام الجوال (Phone Usage)</option>
-              <option value="loitering">كشف التسكع (Loitering)</option>
-              <option value="queue">العميل المنتظر (Queue & Waiting)</option>
-              <option value="employee">مراقبة الموظفين (Staff Presence)</option>
-              <option value="presence">رصد وتواجد الأفراد (Presence)</option>
+              <option value="all">جميع النماذج (YOLO26 Models)</option>
+              <option value="mask">كشف الكمامة (Face Mask Detection)</option>
+              <option value="gloves">كشف القفازات (Gloves & Bare Hand)</option>
+              <option value="phone">كشف استخدام الهاتف (Phone Detection)</option>
             </select>
           </div>
 
@@ -854,21 +821,21 @@ function DetectionsContent() {
                         </span>
                         {/* Storage Tier Indicator */}
                         {item.is_pinned || item.is_acknowledged ? (
-                          <span className="bg-sky-950/90 text-sky-300 border border-sky-500/40 px-1.5 py-0.5 rounded backdrop-blur-xs flex items-center gap-0.5 font-bold text-[9px]">
+                          <span className="bg-sky-950/80 text-sky-300 border border-sky-500/30 px-1.5 py-0.5 rounded font-mono text-[9px] flex items-center gap-1">
                             <Pin className="h-2.5 w-2.5 text-sky-400" />
-                            <span>مثبت دائم</span>
+                            <span>مثبت</span>
                           </span>
                         ) : item.storage_tier === 'warm' ? (
-                          <span className="bg-amber-950/90 text-amber-300 border border-amber-500/40 px-1.5 py-0.5 rounded backdrop-blur-xs font-bold text-[9px]">
-                            📦 Warm
+                          <span className="bg-slate-900/80 text-slate-300 border border-slate-700 px-1.5 py-0.5 rounded font-mono text-[9px]">
+                            Warm
                           </span>
                         ) : item.storage_tier === 'cold' ? (
-                          <span className="bg-slate-900/90 text-slate-400 border border-slate-700 px-1.5 py-0.5 rounded backdrop-blur-xs font-bold text-[9px]">
-                            ❄️ Cold
+                          <span className="bg-slate-900/80 text-slate-400 border border-slate-700 px-1.5 py-0.5 rounded font-mono text-[9px]">
+                            Archive
                           </span>
                         ) : (
-                          <span className="bg-emerald-950/90 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.5 rounded backdrop-blur-xs font-bold text-[9px]">
-                            🔥 Hot
+                          <span className="bg-emerald-950/80 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded font-mono text-[9px]">
+                            Live
                           </span>
                         )}
                       </div>
@@ -1011,24 +978,12 @@ function DetectionsContent() {
                   </div>
                 </div>
 
-                {/* Card Conversion & Status Footer */}
+                {/* Card Status & Feedback Footer */}
                 <div className="p-3 pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs bg-[#070b15]">
-                  <button
-                    onClick={() => handleConvertToTask(item)}
-                    className="flex items-center gap-1 rounded-md bg-slate-800/80 border border-slate-700/80 px-2 py-1 text-[11px] font-medium text-slate-300 hover:text-white hover:bg-slate-700 transition"
-                  >
-                    {taskSuccessId === item.id ? (
-                      <>
-                        <Check className="h-3 w-3 text-emerald-400" />
-                        <span className="text-emerald-400 font-bold">تم الإسناد!</span>
-                      </>
-                    ) : (
-                      <>
-                        <PlusCircle className="h-3 w-3 text-amber-500" />
-                        <span>تحويل لمهمة</span>
-                      </>
-                    )}
-                  </button>
+                  <div className="flex items-center gap-1.5 text-slate-400 text-[11px]">
+                    <Clock className="h-3 w-3 text-slate-500" />
+                    <span>الأولوية: <strong className={item.severity === 'high' ? 'text-rose-400' : 'text-amber-400'}>{item.severity === 'high' ? 'حرجة' : 'عادية'}</strong></span>
+                  </div>
 
                   <div className="flex items-center gap-1.5">
                     {item.feedback_type === 'verified_positive' || item.is_acknowledged ? (
@@ -1244,14 +1199,6 @@ function DetectionsContent() {
               </div>
 
               <div className="flex items-center gap-3">
-                <button
-                  onClick={() => handleConvertToTask(activeInspectItem)}
-                  className="rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 font-semibold text-slate-200 hover:text-white hover:bg-slate-700 transition flex items-center gap-1.5"
-                >
-                  <PlusCircle className="h-4 w-4 text-amber-500" />
-                  <span>تحويل لمهمة عمل</span>
-                </button>
-
                 <button
                   onClick={() => handleFeedback(activeInspectItem.id, 'false_positive')}
                   className="rounded-lg bg-rose-500/15 border border-rose-500/30 px-3.5 py-2 font-semibold text-rose-300 hover:bg-rose-500/25 transition flex items-center gap-1.5"

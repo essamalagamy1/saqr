@@ -67,6 +67,48 @@ function setAgentUI(running) {
   }
 }
 
+function getActiveModels(cam) {
+  if (Array.isArray(cam.activeModels) && cam.activeModels.length > 0) {
+    return cam.activeModels;
+  }
+  return ['face_mask', 'gloves', 'phone'];
+}
+
+function getActiveModelsLabel(cam) {
+  if (!cam.enabled) return 'معطلة مؤقتاً';
+  const models = getActiveModels(cam);
+  if (models.length === 0) return 'نشطة • بدون نماذج';
+  const names = [];
+  if (models.includes('face_mask')) names.push('كمامة');
+  if (models.includes('gloves')) names.push('قفازات');
+  if (models.includes('phone')) names.push('هاتف');
+  return `نشطة • (${names.join(' + ')})`;
+}
+
+async function toggleCameraModel(camId, modelName, event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  const cameras = await rased.cameras.list();
+  const cam = cameras.find(c => c.id === camId);
+  if (!cam) return;
+
+  let models = [...getActiveModels(cam)];
+  if (models.includes(modelName)) {
+    models = models.filter(m => m !== modelName);
+  } else {
+    models.push(modelName);
+  }
+
+  // Update locally and notify agent
+  cam.activeModels = models;
+  await rased.cameras.update(camId, { activeModels: models });
+
+  // Update UI card responsively without jarring reload
+  loadCameras();
+}
+
 // ===== Cameras =====
 async function loadCameras() {
   const cameras = await rased.cameras.list();
@@ -93,6 +135,7 @@ async function loadCameras() {
     const hasCreds = /rtsp:\/\/[^@:]+:[^@]+@/i.test(cam.rtspUrl || '');
     const isLocalCam = (cam.rtspUrl || '').includes('192.168.') || (cam.rtspUrl || '').includes('10.');
     const needsPassword = !hasCreds && isLocalCam;
+    const active = getActiveModels(cam);
 
     return `
     <div class="camera-card ${cam.enabled ? '' : 'disabled'}">
@@ -103,7 +146,7 @@ async function loadCameras() {
         <div class="camera-title-row">
           <span class="camera-name">${escapeHtml(cam.name)}</span>
           <span class="camera-chip ${cam.enabled ? 'chip-active' : 'chip-inactive'}">
-            ${cam.enabled ? 'نشطة • معالجة YOLOX' : 'معطلة مؤقتاً'}
+            ${getActiveModelsLabel(cam)}
           </span>
           ${needsPassword ? `
             <span class="camera-chip chip-warning">
@@ -111,6 +154,26 @@ async function loadCameras() {
             </span>` : ''}
         </div>
         <div class="camera-url">${escapeHtml(maskPasswordInUrl(cam.rtspUrl) || 'بدون مسار بث')}</div>
+
+        <!-- Multi-Model Selector Bar (3 YOLO26 Models) -->
+        <div class="camera-models-bar">
+          <span class="models-bar-label">النماذج النشطة:</span>
+          <button type="button" class="model-pill model-mask ${active.includes('face_mask') ? 'active' : ''}" onclick="toggleCameraModel('${cam.id}', 'face_mask', event)" title="تشغيل / إيقاف نموذج رصد ارتداء الكمامة">
+            <span class="pill-icon">😷</span>
+            <span>الكمامة</span>
+            <span class="pill-dot"></span>
+          </button>
+          <button type="button" class="model-pill model-gloves ${active.includes('gloves') ? 'active' : ''}" onclick="toggleCameraModel('${cam.id}', 'gloves', event)" title="تشغيل / إيقاف نموذج رصد القفازات والأيدي المكشوفة">
+            <span class="pill-icon">🧤</span>
+            <span>القفازات</span>
+            <span class="pill-dot"></span>
+          </button>
+          <button type="button" class="model-pill model-phone ${active.includes('phone') ? 'active' : ''}" onclick="toggleCameraModel('${cam.id}', 'phone', event)" title="تشغيل / إيقاف نموذج رصد استخدام الهاتف المحمول">
+            <span class="pill-icon">📱</span>
+            <span>الهاتف</span>
+            <span class="pill-dot"></span>
+          </button>
+        </div>
       </div>
       <div class="camera-actions">
         <!-- Expand NVR Channels (16 Channels) Button -->
@@ -347,7 +410,13 @@ async function addCamera() {
     rtspUrl = 'rtsp://' + rtspUrl;
   }
 
-  await rased.cameras.add({ name, rtspUrl, branchId, branchName, enabled: true });
+  const activeModels = [];
+  if (document.getElementById('addModelMask')?.checked) activeModels.push('face_mask');
+  if (document.getElementById('addModelGloves')?.checked) activeModels.push('gloves');
+  if (document.getElementById('addModelPhone')?.checked) activeModels.push('phone');
+  if (activeModels.length === 0) activeModels.push('face_mask', 'gloves', 'phone');
+
+  await rased.cameras.add({ name, rtspUrl, branchId, branchName, enabled: true, activeModels });
   closeAddCameraModal();
   loadCameras();
 }

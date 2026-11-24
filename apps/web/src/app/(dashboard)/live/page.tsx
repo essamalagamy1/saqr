@@ -92,44 +92,49 @@ export default function LiveFeedsPage() {
   return (
     <div className="space-y-6">
       {/* Header and Controls */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800/80 pb-4">
         <div>
-          <h1 className="text-xl font-bold text-white flex items-center gap-2">
-            <Video className="h-5 w-5 text-amber-500" />
-            البث المباشر للكاميرات (WebRTC Live Grid)
-          </h1>
-          <p className="text-xs text-slate-400 mt-0.5">
-            بث لحظي منخفض التأخير (&lt;200ms) عبر وكيل المراقبة الميداني Saqr Edge Agent
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-lg sm:text-xl font-bold tracking-tight text-white flex items-center gap-2">
+              <Video className="h-5 w-5 text-sky-400" />
+              البث المباشر للكاميرات الميدانية
+            </h1>
+            <span className="font-mono text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+              {cameras.length} قنوات
+            </span>
+          </div>
+          <p className="text-xs text-slate-400 mt-1">
+            مراقبة حية لحظية منخفضة التأخير لمسجلات وقنوات الـ RTSP المحلية
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5 flex-wrap">
           <button
             onClick={() => setShowOverlays(!showOverlays)}
-            className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
+            className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition ${
               showOverlays
-                ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                ? 'border-sky-500/30 bg-sky-500/10 text-sky-300'
                 : 'border-slate-800 bg-slate-900/60 text-slate-400 hover:text-slate-200'
             }`}
           >
-            {showOverlays ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-            <span>{showOverlays ? 'إخفاء طبقات الذكاء (AI HUD)' : 'إظهار طبقات الذكاء'}</span>
+            {showOverlays ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+            <span>{showOverlays ? 'إخفاء البيانات' : 'إظهار البيانات'}</span>
           </button>
 
           <button
             onClick={() => { setFrameTick(Date.now()); fetchCameras(); }}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-800 transition"
+            className="flex items-center gap-1.5 rounded-md border border-slate-800 bg-slate-900/60 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-800 transition"
           >
-            <RefreshCw className="h-3.5 w-3.5 text-amber-500" />
+            <RefreshCw className="h-3.5 w-3.5 text-slate-400" />
             <span>تحديث البث</span>
           </button>
 
           <select
             value={selectedZone}
             onChange={(e) => setSelectedZone(e.target.value)}
-            className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+            className="rounded-md border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-sky-500"
           >
-            <option value="all">كل الكاميرات المتصلة ({cameras.length})</option>
+            <option value="all">كل الكاميرات ({cameras.length})</option>
             {Array.from(new Set(cameras.map(c => c.zone_name).filter(Boolean))).map((z) => (
               <option key={z as string} value={z as string}>{z as string}</option>
             ))}
@@ -138,20 +143,20 @@ export default function LiveFeedsPage() {
       </div>
 
       {/* Cameras Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
         {loading ? (
-          <div className="col-span-full py-16 text-center text-slate-500">
-            <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2 text-amber-500" />
+          <div className="col-span-full py-16 text-center text-slate-400">
+            <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2 text-sky-400" />
             جاري تهيئة قنوات البث المباشر...
           </div>
         ) : displayedCameras.length === 0 ? (
-          <div className="col-span-full py-16 text-center text-slate-500 rounded-xl border border-slate-800 bg-[#0d1527]">
+          <div className="col-span-full py-16 text-center text-slate-400 rounded-lg border border-slate-800 bg-[#0d131f]">
             <CameraIcon className="h-10 w-10 text-slate-600 mx-auto mb-3" />
-            <div className="text-sm font-bold text-slate-300 mb-1">لا توجد كاميرات متصلة بالبث المباشر حالياً</div>
-            <p className="text-xs text-slate-500 mb-4">قم بفحص الشبكة أو إضافة كاميرات جديدة من صفحة إدارة الكاميرات</p>
+            <div className="text-sm font-semibold text-slate-300 mb-1">لا توجد كاميرات متصلة بالبث المباشر حالياً</div>
+            <p className="text-xs text-slate-400 mb-4">قم بفحص الشبكة أو إضافة كاميرات جديدة من صفحة إدارة الكاميرات</p>
             <a
               href="/cameras"
-              className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-amber-400 transition shadow-lg shadow-amber-500/20"
+              className="inline-flex items-center gap-2 rounded-md bg-sky-600 hover:bg-sky-500 px-4 py-2 text-xs font-semibold text-white transition"
             >
               <span>الانتقال لإدارة وفحص الكاميرات</span>
             </a>

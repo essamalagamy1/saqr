@@ -131,19 +131,13 @@ export default function CamerasPage() {
   const applyPresetRole = (role: 'kitchen' | 'entrance' | 'lobby' | 'warehouse' | 'general') => {
     setCurrentRole(role);
     if (role === 'kitchen') {
-      setEnabledServices(['kitchen_ppe', 'phone_usage']);
-      setCooldownSec(180);
-    } else if (role === 'entrance') {
-      setEnabledServices(['visitor_counting', 'employee_monitoring']);
-      setCooldownSec(30);
-    } else if (role === 'lobby') {
-      setEnabledServices(['loitering_detection', 'employee_monitoring']);
-      setCooldownSec(180);
-    } else if (role === 'warehouse') {
-      setEnabledServices(['loitering_detection', 'employee_monitoring']);
-      setCooldownSec(300);
+      setEnabledServices(['kitchen_ppe', 'gloves', 'phone_usage']);
+      setCooldownSec(120);
+    } else if (role === 'general') {
+      setEnabledServices(['kitchen_ppe', 'gloves', 'phone_usage']);
+      setCooldownSec(90);
     } else {
-      setEnabledServices(['employee_monitoring']);
+      setEnabledServices(['phone_usage']);
       setCooldownSec(60);
     }
   };
@@ -183,49 +177,44 @@ export default function CamerasPage() {
       parsed = typeof cam.config === 'string' ? JSON.parse(cam.config) : (cam.config || {});
     } catch {}
 
-    const role = parsed.role || (
-      cam.name.includes('مطبخ') || cam.name.includes('D8') || cam.name.includes('CH8') || cam.name.includes('CH3') || cam.name.includes('CH4')
-        ? 'kitchen'
-        : (cam.name.includes('مدخل') || cam.name.includes('D1') || cam.name.includes('CH1') ? 'entrance' : 'general')
-    );
-
-    const svcs: string[] = Array.isArray(parsed.enabled_services) ? parsed.enabled_services : [];
-
-    if (role === 'kitchen') {
-      return (
-        <span className="inline-flex items-center gap-1.5 rounded-md bg-rose-500/10 border border-rose-500/25 px-2 py-0.5 text-[11px] font-bold text-rose-300">
-          <ChefHat className="h-3 w-3 text-rose-400" />
-          مطبخ (PPE + جوال)
-        </span>
-      );
-    } else if (role === 'entrance') {
-      return (
-        <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/25 px-2 py-0.5 text-[11px] font-bold text-emerald-300">
-          <DoorOpen className="h-3 w-3 text-emerald-400" />
-          مدخل (عد زوار)
-        </span>
-      );
-    } else if (role === 'lobby') {
-      return (
-        <span className="inline-flex items-center gap-1.5 rounded-md bg-sky-500/10 border border-sky-500/25 px-2 py-0.5 text-[11px] font-bold text-sky-300">
-          <Users className="h-3 w-3 text-sky-400" />
-          صالة (تسكع + انتظار)
-        </span>
-      );
-    } else if (role === 'warehouse') {
-      return (
-        <span className="inline-flex items-center gap-1.5 rounded-md bg-purple-500/10 border border-purple-500/25 px-2 py-0.5 text-[11px] font-bold text-purple-300">
-          <ShieldAlert className="h-3 w-3 text-purple-400" />
-          مستودع / منطقة محظورة
-        </span>
-      );
-    }
+    const svcs: string[] = Array.isArray(parsed.enabled_services) ? parsed.enabled_services : ['kitchen_ppe', 'gloves', 'phone_usage'];
+    const hasMask = svcs.includes('kitchen_ppe') || svcs.includes('face_mask');
+    const hasGloves = svcs.includes('gloves');
+    const hasPhone = svcs.includes('phone_usage') || svcs.includes('phone');
 
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-md bg-slate-800 border border-slate-700 px-2 py-0.5 text-[11px] text-slate-300">
-        <Brain className="h-3 w-3 text-amber-400" />
-        {svcs.length > 0 ? `مخصص (${svcs.length} خدمات)` : 'عام (مراقبة حركة)'}
-      </span>
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span
+          className={`font-mono text-[10px] px-2 py-0.5 rounded border transition ${
+            hasMask
+              ? 'border-sky-500/30 bg-sky-500/10 text-sky-300 font-medium'
+              : 'border-slate-800 bg-slate-900/50 text-slate-400 line-through'
+          }`}
+          title={hasMask ? 'موديل كشف الكمامة: نشط' : 'موديل كشف الكمامة: معطل'}
+        >
+          الكمامة
+        </span>
+        <span
+          className={`font-mono text-[10px] px-2 py-0.5 rounded border transition ${
+            hasGloves
+              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 font-medium'
+              : 'border-slate-800 bg-slate-900/50 text-slate-400 line-through'
+          }`}
+          title={hasGloves ? 'موديل كشف القفازات: نشط' : 'موديل كشف القفازات: معطل'}
+        >
+          القفازات
+        </span>
+        <span
+          className={`font-mono text-[10px] px-2 py-0.5 rounded border transition ${
+            hasPhone
+              ? 'border-purple-500/30 bg-purple-500/10 text-purple-300 font-medium'
+              : 'border-slate-800 bg-slate-900/50 text-slate-400 line-through'
+          }`}
+          title={hasPhone ? 'موديل كشف الهاتف: نشط' : 'موديل كشف الهاتف: معطل'}
+        >
+          الهاتف
+        </span>
+      </div>
     );
   };
 
@@ -586,67 +575,72 @@ export default function CamerasPage() {
   return (
     <div className="space-y-6">
       {/* Title & Actions */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800/80 pb-4">
         <div>
-          <h1 className="text-xl font-bold text-white flex items-center gap-2">
-            <Camera className="h-5 w-5 text-amber-500" />
-            إدارة الكاميرات وقنوات البث
-          </h1>
-          <p className="text-xs text-slate-400 mt-0.5">
-            ربط كاميرات الـ IP الميدانية وأجهزة الـ DVR / NVR المحلية بالذكاء الاصطناعي
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-lg sm:text-xl font-bold tracking-tight text-white flex items-center gap-2">
+              <Camera className="h-5 w-5 text-sky-400" />
+              إدارة الكاميرات وقنوات البث
+            </h1>
+            <span className="font-mono text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+              {cameras.length} كاميرات
+            </span>
+          </div>
+          <p className="text-xs text-slate-400 mt-1">
+            ربط كاميرات الـ IP وأجهزة الـ DVR / NVR وتخصيص نماذج YOLO26 لكل قناة بشكل مستقل
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={loadData}
             title="تحديث القائمة"
-            className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition"
+            className="p-2 rounded-md border border-slate-800 bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800 transition"
           >
-            <RefreshCw className="h-4 w-4" />
+            <RefreshCw className="h-3.5 w-3.5" />
           </button>
           <button
             onClick={handleSyncFromAgent}
             disabled={syncingAgent}
             title="جلب ومزامنة الكاميرات المسجلة في تطبيق صقر الميداني (Edge Agent)"
-            className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-700 px-4 py-2 text-xs font-bold text-white hover:from-emerald-500 hover:to-teal-600 transition-all shadow-lg shadow-emerald-600/25 border border-emerald-500/30 disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-md border border-slate-800 bg-slate-900/60 hover:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 transition disabled:opacity-50"
           >
             {syncingAgent ? (
-              <Loader2 className="h-4 w-4 animate-spin text-white" />
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-sky-400" />
             ) : (
-              <Download className="h-4 w-4 text-emerald-200" />
+              <Download className="h-3.5 w-3.5 text-slate-400" />
             )}
-            <span>{syncingAgent ? 'جاري جلب الكاميرات...' : '📥 جلب كاميرات تطبيق Edge Agent'}</span>
+            <span>{syncingAgent ? 'جاري الجلب...' : 'جلب من Edge Agent'}</span>
           </button>
           <button
             onClick={() => setShowDvrModal(true)}
-            className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 px-4 py-2 text-xs font-bold text-black hover:from-amber-400 hover:to-amber-500 transition-all shadow-lg shadow-amber-500/25 border border-amber-400/40"
+            className="flex items-center gap-1.5 rounded-md border border-slate-800 bg-slate-900/60 hover:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 transition"
           >
-            <Radio className="h-4 w-4 text-black" />
-            <span>⚡ ربط واستيراد من DVR / NVR</span>
+            <Radio className="h-3.5 w-3.5 text-slate-400" />
+            <span>ربط مسجل DVR / NVR</span>
           </button>
           <button
             onClick={handleStartScan}
-            className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-sky-600 to-sky-700 px-4 py-2 text-xs font-bold text-white hover:from-sky-500 hover:to-sky-600 transition-all shadow-lg shadow-sky-600/25 border border-sky-500/30"
+            className="flex items-center gap-1.5 rounded-md border border-slate-800 bg-slate-900/60 hover:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 transition"
           >
-            <Search className="h-4 w-4" />
-            <span>🔍 فحص واكتشاف كاميرات الشبكة</span>
+            <Search className="h-3.5 w-3.5 text-slate-400" />
+            <span>فحص الشبكة (RTSP)</span>
           </button>
           <button
             onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-xs font-bold text-black hover:bg-amber-400 transition-colors shadow-lg shadow-amber-500/20"
+            className="flex items-center gap-1.5 rounded-md bg-sky-600 hover:bg-sky-500 px-3.5 py-1.5 text-xs font-semibold text-white transition"
           >
-            <Plus className="h-4 w-4" />
+            <Plus className="h-3.5 w-3.5" />
             <span>إضافة يدوية</span>
           </button>
           {cameras.length > 0 && (
             <button
               onClick={handleDeleteAllCameras}
               title="حذف جميع الكاميرات دفعة واحدة"
-              className="flex items-center gap-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 px-3.5 py-2 text-xs font-bold transition shadow-sm"
+              className="flex items-center gap-1 rounded-md border border-red-500/20 bg-red-500/5 hover:bg-red-500/10 text-red-400 px-2.5 py-1.5 text-xs font-medium transition"
             >
-              <Trash2 className="h-4 w-4" />
-              <span>حذف الكل ({cameras.length})</span>
+              <Trash2 className="h-3.5 w-3.5" />
+              <span>حذف الكل</span>
             </button>
           )}
         </div>
@@ -1344,320 +1338,205 @@ export default function CamerasPage() {
 
       {/* Camera AI Customization Modal */}
       {selectedCamForAi && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md">
-          <div className="w-full max-w-2xl rounded-2xl border border-slate-700 bg-[#0d1527] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-xl rounded-lg border border-slate-800 bg-[#0d131f] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             {/* Modal Header */}
-            <div className="flex items-center justify-between p-5 border-b border-slate-800 bg-slate-900/80">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 rounded-xl bg-gradient-to-br from-amber-500/20 to-sky-500/20 border border-amber-500/30 text-amber-400">
-                  <Brain className="h-6 w-6" />
+            <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-800 bg-[#090e17]">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-md bg-sky-500/10 border border-sky-500/20 text-sky-400">
+                  <Sliders className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-white flex items-center gap-2">
-                    <span>تخصيص موديولات الذكاء الاصطناعي والدور</span>
-                    <span className="text-xs font-mono px-2 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 text-sky-400">
+                  <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                    <span>تخصيص نماذج الرصد (YOLO26)</span>
+                    <span className="font-mono text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
                       {selectedCamForAi.name}
                     </span>
                   </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    حدد بيئة عمل الكاميرا والخدمات المصرح بتشغيلها لمنع الإنذارات العشوائية وتوجيه الموديل بدقة
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    اختر النماذج المستقلة التي ستعمل بالتزامن على هذه الكاميرا
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setSelectedCamForAi(null)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg transition"
+                className="text-slate-400 hover:text-white p-1 rounded-md transition"
               >
                 ✕
               </button>
             </div>
 
             {/* Modal Body */}
-            <div className="p-6 overflow-y-auto space-y-6">
-              {/* Presets Grid */}
-              <div>
-                <label className="block text-slate-200 font-bold text-xs mb-2.5 flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 text-amber-400" />
-                  <span>الأنماط الجاهزة السريعة (One-Click Presets):</span>
-                </label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            <div className="p-4 sm:p-6 overflow-y-auto space-y-5">
+              {/* Quick Select Actions */}
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-200">النماذج المستقلة النشطة ({enabledServices.length} من 3)</span>
+                <div className="flex items-center gap-2 text-xs">
                   <button
                     type="button"
-                    onClick={() => applyPresetRole('kitchen')}
-                    className={`p-3 rounded-xl border text-right transition flex flex-col justify-between ${
-                      currentRole === 'kitchen'
-                        ? 'border-rose-500 bg-rose-500/15 shadow-lg shadow-rose-500/10'
-                        : 'border-slate-800 bg-slate-900/50 hover:border-slate-700'
-                    }`}
+                    onClick={() => setEnabledServices(['kitchen_ppe', 'gloves', 'phone_usage'])}
+                    className="text-sky-400 hover:text-sky-300 font-medium"
                   >
-                    <div className="flex items-center justify-between w-full mb-1">
-                      <ChefHat className={`h-5 w-5 ${currentRole === 'kitchen' ? 'text-rose-400' : 'text-slate-400'}`} />
-                      {currentRole === 'kitchen' && <Check className="h-3.5 w-3.5 text-rose-400" />}
-                    </div>
-                    <div className="font-bold text-xs text-white">مطبخ وتحضير</div>
-                    <div className="text-[10px] text-slate-400 mt-1">PPE كمامة + جوال (يمنع عد الزوار والتسكع)</div>
+                    تفعيل الكل
                   </button>
-
+                  <span className="text-slate-600">•</span>
                   <button
                     type="button"
-                    onClick={() => applyPresetRole('entrance')}
-                    className={`p-3 rounded-xl border text-right transition flex flex-col justify-between ${
-                      currentRole === 'entrance'
-                        ? 'border-emerald-500 bg-emerald-500/15 shadow-lg shadow-emerald-500/10'
-                        : 'border-slate-800 bg-slate-900/50 hover:border-slate-700'
-                    }`}
+                    onClick={() => setEnabledServices([])}
+                    className="text-slate-400 hover:text-slate-300 font-medium"
                   >
-                    <div className="flex items-center justify-between w-full mb-1">
-                      <DoorOpen className={`h-5 w-5 ${currentRole === 'entrance' ? 'text-emerald-400' : 'text-slate-400'}`} />
-                      {currentRole === 'entrance' && <Check className="h-3.5 w-3.5 text-emerald-400" />}
-                    </div>
-                    <div className="font-bold text-xs text-white">مدخل وبوابة</div>
-                    <div className="text-[10px] text-slate-400 mt-1">عد الزوار (دخول/خروج) وتوافد</div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => applyPresetRole('lobby')}
-                    className={`p-3 rounded-xl border text-right transition flex flex-col justify-between ${
-                      currentRole === 'lobby'
-                        ? 'border-sky-500 bg-sky-500/15 shadow-lg shadow-sky-500/10'
-                        : 'border-slate-800 bg-slate-900/50 hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between w-full mb-1">
-                      <Users className={`h-5 w-5 ${currentRole === 'lobby' ? 'text-sky-400' : 'text-slate-400'}`} />
-                      {currentRole === 'lobby' && <Check className="h-3.5 w-3.5 text-sky-400" />}
-                    </div>
-                    <div className="font-bold text-xs text-white">صالة واستقبال</div>
-                    <div className="text-[10px] text-slate-400 mt-1">كشف التسكع والانتظار العام</div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => applyPresetRole('warehouse')}
-                    className={`p-3 rounded-xl border text-right transition flex flex-col justify-between ${
-                      currentRole === 'warehouse'
-                        ? 'border-purple-500 bg-purple-500/15 shadow-lg shadow-purple-500/10'
-                        : 'border-slate-800 bg-slate-900/50 hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between w-full mb-1">
-                      <ShieldAlert className={`h-5 w-5 ${currentRole === 'warehouse' ? 'text-purple-400' : 'text-slate-400'}`} />
-                      {currentRole === 'warehouse' && <Check className="h-3.5 w-3.5 text-purple-400" />}
-                    </div>
-                    <div className="font-bold text-xs text-white">منطقة محظورة</div>
-                    <div className="text-[10px] text-slate-400 mt-1">تسكع وحركة وتسلل ليلي</div>
+                    تعطيل الكل
                   </button>
                 </div>
               </div>
 
-              {/* Individual Services Toggle List */}
-              <div className="space-y-3">
-                <label className="block text-slate-200 font-bold text-xs flex items-center justify-between">
-                  <span className="flex items-center gap-2">
-                    <Sliders className="h-4 w-4 text-sky-400" />
-                    <span>الخدمات والموديولات النشطة على هذه الكاميرا:</span>
-                  </span>
-                  <span className="text-[11px] text-slate-400">
-                    مفعل ({enabledServices.length} من 5)
-                  </span>
-                </label>
-
-                <div className="space-y-2">
-                  {/* Service 1: PPE */}
-                  <div
-                    onClick={() => toggleAiService('kitchen_ppe')}
-                    className={`p-3.5 rounded-xl border transition cursor-pointer flex items-center justify-between ${
-                      enabledServices.includes('kitchen_ppe')
-                        ? 'bg-rose-500/10 border-rose-500/30'
-                        : 'bg-slate-900/40 border-slate-800 opacity-60 hover:opacity-100'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-lg ${enabledServices.includes('kitchen_ppe') ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-800 text-slate-500'}`}>
-                        <ChefHat className="h-5 w-5" />
+              {/* 3 Dedicated YOLO26 Model Cards */}
+              <div className="space-y-2.5">
+                {/* Model 1: Face Mask */}
+                <div
+                  onClick={() => toggleAiService('kitchen_ppe')}
+                  className={`p-3.5 rounded-lg border transition cursor-pointer flex items-center justify-between ${
+                    enabledServices.includes('kitchen_ppe') || enabledServices.includes('face_mask')
+                      ? 'bg-sky-500/5 border-sky-500/30'
+                      : 'bg-slate-900/30 border-slate-800/80 opacity-60 hover:opacity-100'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-md ${
+                      enabledServices.includes('kitchen_ppe') || enabledServices.includes('face_mask')
+                        ? 'bg-sky-500/10 text-sky-400'
+                        : 'bg-slate-800 text-slate-500'
+                    }`}>
+                      <ChefHat className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-xs text-white flex items-center gap-2">
+                        <span>كشف ارتداء الكمامة (Face Mask Detection)</span>
+                        <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-300">YOLO26</span>
                       </div>
-                      <div>
-                        <div className="font-bold text-xs text-white flex items-center gap-2">
-                          <span>سلامة المطبخ (PPE)</span>
-                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300">أولوية عليا</span>
-                        </div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
-                          رصد عدم ارتداء الكمامة الطبية أو غطاء الرأس والشعر للعاملين (فحص منطقة الوجه Two-Stage)
-                        </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">
+                        اكتشاف عدم ارتداء الكمامة أو ارتدائها بشكل غير صحيح
                       </div>
                     </div>
-                    <input
-                      type="checkbox"
-                      checked={enabledServices.includes('kitchen_ppe')}
-                      onChange={() => {}}
-                      className="h-4 w-4 rounded border-slate-700 text-rose-600 focus:ring-rose-500"
-                    />
                   </div>
+                  <input
+                    type="checkbox"
+                    checked={enabledServices.includes('kitchen_ppe') || enabledServices.includes('face_mask')}
+                    onChange={() => {}}
+                    className="h-4 w-4 rounded border-slate-700 text-sky-600 focus:ring-sky-500"
+                  />
+                </div>
 
-                  {/* Service 2: Phone */}
-                  <div
-                    onClick={() => toggleAiService('phone_usage')}
-                    className={`p-3.5 rounded-xl border transition cursor-pointer flex items-center justify-between ${
+                {/* Model 2: Gloves & Bare Hand */}
+                <div
+                  onClick={() => toggleAiService('gloves')}
+                  className={`p-3.5 rounded-lg border transition cursor-pointer flex items-center justify-between ${
+                    enabledServices.includes('gloves')
+                      ? 'bg-emerald-500/5 border-emerald-500/30'
+                      : 'bg-slate-900/30 border-slate-800/80 opacity-60 hover:opacity-100'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-md ${
+                      enabledServices.includes('gloves')
+                        ? 'bg-emerald-500/10 text-emerald-400'
+                        : 'bg-slate-800 text-slate-500'
+                    }`}>
+                      <ShieldAlert className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-xs text-white flex items-center gap-2">
+                        <span>كشف القفازات والأيدي المكشوفة (Gloves & Bare Hand)</span>
+                        <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-300">YOLO26</span>
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">
+                        رصد ارتداء قفازات الاستخدام الواحد وكشف الأيدي المكشوفة
+                      </div>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={enabledServices.includes('gloves')}
+                    onChange={() => {}}
+                    className="h-4 w-4 rounded border-slate-700 text-emerald-600 focus:ring-emerald-500"
+                  />
+                </div>
+
+                {/* Model 3: Phone Usage */}
+                <div
+                  onClick={() => toggleAiService('phone_usage')}
+                  className={`p-3.5 rounded-lg border transition cursor-pointer flex items-center justify-between ${
+                    enabledServices.includes('phone_usage')
+                      ? 'bg-purple-500/5 border-purple-500/30'
+                      : 'bg-slate-900/30 border-slate-800/80 opacity-60 hover:opacity-100'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-md ${
                       enabledServices.includes('phone_usage')
-                        ? 'bg-purple-500/10 border-purple-500/30'
-                        : 'bg-slate-900/40 border-slate-800 opacity-60 hover:opacity-100'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-lg ${enabledServices.includes('phone_usage') ? 'bg-purple-500/20 text-purple-400' : 'bg-slate-800 text-slate-500'}`}>
-                        <Smartphone className="h-5 w-5" />
+                        ? 'bg-purple-500/10 text-purple-400'
+                        : 'bg-slate-800 text-slate-500'
+                    }`}>
+                      <Smartphone className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-xs text-white flex items-center gap-2">
+                        <span>كشف استخدام الهاتف المحمول (Phone Usage)</span>
+                        <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-300">YOLO26</span>
                       </div>
-                      <div>
-                        <div className="font-bold text-xs text-white flex items-center gap-2">
-                          <span>كشف استخدام الجوال (Phone Usage)</span>
-                        </div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
-                          رصد انشغال الموظفين أو الطهاة بالهاتف في اليدين أو على الأذن أثناء ساعات العمل
-                        </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">
+                        رصد انشغال العاملين بالهاتف في اليدين أو على الأذن
                       </div>
                     </div>
-                    <input
-                      type="checkbox"
-                      checked={enabledServices.includes('phone_usage')}
-                      onChange={() => {}}
-                      className="h-4 w-4 rounded border-slate-700 text-purple-600 focus:ring-purple-500"
-                    />
                   </div>
-
-                  {/* Service 3: Visitor Counting */}
-                  <div
-                    onClick={() => toggleAiService('visitor_counting')}
-                    className={`p-3.5 rounded-xl border transition cursor-pointer flex items-center justify-between ${
-                      enabledServices.includes('visitor_counting')
-                        ? 'bg-emerald-500/10 border-emerald-500/30'
-                        : 'bg-slate-900/40 border-slate-800 opacity-60 hover:opacity-100'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-lg ${enabledServices.includes('visitor_counting') ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
-                        <DoorOpen className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <div className="font-bold text-xs text-white flex items-center gap-2">
-                          <span>عد الزوار والتوافد (Visitor Counting)</span>
-                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300">بوابات فقط</span>
-                        </div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
-                          حساب عدد الداخلين والخارجين عبر خط عبور البوابة الافتراضي وقياس إجمالي الحركة
-                        </div>
-                      </div>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={enabledServices.includes('visitor_counting')}
-                      onChange={() => {}}
-                      className="h-4 w-4 rounded border-slate-700 text-emerald-600 focus:ring-emerald-500"
-                    />
-                  </div>
-
-                  {/* Service 4: Loitering */}
-                  <div
-                    onClick={() => toggleAiService('loitering_detection')}
-                    className={`p-3.5 rounded-xl border transition cursor-pointer flex items-center justify-between ${
-                      enabledServices.includes('loitering_detection')
-                        ? 'bg-amber-500/10 border-amber-500/30'
-                        : 'bg-slate-900/40 border-slate-800 opacity-60 hover:opacity-100'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-lg ${enabledServices.includes('loitering_detection') ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-800 text-slate-500'}`}>
-                        <Clock className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <div className="font-bold text-xs text-white flex items-center gap-2">
-                          <span>كشف التسكع والانتظار (Loitering Detection)</span>
-                        </div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
-                          تنبيه عند وقوف الأفراد لأكثر من 45 ثانية في أماكن غير مخصصة للانتظار
-                        </div>
-                      </div>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={enabledServices.includes('loitering_detection')}
-                      onChange={() => {}}
-                      className="h-4 w-4 rounded border-slate-700 text-amber-600 focus:ring-amber-500"
-                    />
-                  </div>
-
-                  {/* Service 5: Employee Monitoring */}
-                  <div
-                    onClick={() => toggleAiService('employee_monitoring')}
-                    className={`p-3.5 rounded-xl border transition cursor-pointer flex items-center justify-between ${
-                      enabledServices.includes('employee_monitoring')
-                        ? 'bg-sky-500/10 border-sky-500/30'
-                        : 'bg-slate-900/40 border-slate-800 opacity-60 hover:opacity-100'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-lg ${enabledServices.includes('employee_monitoring') ? 'bg-sky-500/20 text-sky-400' : 'bg-slate-800 text-slate-500'}`}>
-                        <Users className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <div className="font-bold text-xs text-white flex items-center gap-2">
-                          <span>حركة وتواجد الأفراد (Presence Monitoring)</span>
-                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-400">أولوية منخفضة</span>
-                        </div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
-                          رصد التواجد والحركة العامة بدون إنذارات في حال عدم وجود أي مخالفات سلامة
-                        </div>
-                      </div>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={enabledServices.includes('employee_monitoring')}
-                      onChange={() => {}}
-                      className="h-4 w-4 rounded border-slate-700 text-sky-600 focus:ring-sky-500"
-                    />
-                  </div>
+                  <input
+                    type="checkbox"
+                    checked={enabledServices.includes('phone_usage')}
+                    onChange={() => {}}
+                    className="h-4 w-4 rounded border-slate-700 text-purple-600 focus:ring-purple-500"
+                  />
                 </div>
               </div>
 
               {/* Cooldown Settings */}
-              <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-2">
+              <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4 space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-slate-200 font-bold text-xs flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-amber-400" />
-                    <span>فترة الصمت بين الإنذارات المتكررة لنفس الكاميرا (Cooldown):</span>
+                  <label className="text-slate-200 font-semibold text-xs flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-slate-400" />
+                    <span>فترة الصمت بين التنبيهات لنفس الكاميرا (Cooldown):</span>
                   </label>
-                  <span className="font-mono font-bold text-xs text-amber-400">
-                    {cooldownSec} ثانية ({Math.round(cooldownSec / 60)} دقيقة)
+                  <span className="font-mono font-bold text-xs text-slate-200">
+                    {cooldownSec} ثانية
                   </span>
                 </div>
-                <div className="flex items-center gap-2 pt-1">
-                  {[30, 60, 120, 180, 300].map((sec) => (
+                <div className="flex items-center gap-2 pt-1 flex-wrap">
+                  {[30, 60, 90, 120, 180, 300].map((sec) => (
                     <button
                       key={sec}
                       type="button"
                       onClick={() => setCooldownSec(sec)}
-                      className={`px-3 py-1 rounded-lg text-xs font-mono transition border ${
+                      className={`px-3 py-1 rounded-md text-xs font-mono transition border ${
                         cooldownSec === sec
-                          ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 font-bold'
-                          : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
+                          ? 'bg-sky-500/10 border-sky-500/40 text-sky-300 font-semibold'
+                          : 'bg-slate-800 border-slate-700/80 text-slate-400 hover:text-white'
                       }`}
                     >
                       {sec}ث
                     </button>
                   ))}
                 </div>
-                <p className="text-[11px] text-slate-500 pt-1">
-                  تمنع إرسال إنذارات متكررة لنفس الشخص أو نفس الكاميرا حتى انتهاء فترة الصمت، مما يمنع إزعاج الإشعارات.
+                <p className="text-[11px] text-slate-500 pt-0.5">
+                  تمنع تكرار الإنذارات لنفس الشخص حتى تنتهي المدة لتقليل الإزعاج.
                 </p>
               </div>
             </div>
 
             {/* Modal Footer */}
-            <div className="flex items-center justify-between p-4 border-t border-slate-800 bg-[#0b1222]">
+            <div className="flex items-center justify-between p-4 border-t border-slate-800 bg-[#090e17]">
               <button
                 type="button"
                 onClick={() => setSelectedCamForAi(null)}
-                className="rounded-lg bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700 transition"
+                className="rounded-md border border-slate-800 bg-slate-900/60 px-4 py-2 text-xs font-medium text-slate-400 hover:text-white transition"
               >
                 إلغاء
               </button>
@@ -1666,17 +1545,17 @@ export default function CamerasPage() {
                 type="button"
                 onClick={handleSaveAiConfig}
                 disabled={savingAiConfig}
-                className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 px-6 py-2.5 text-xs font-bold text-black hover:from-amber-400 hover:to-amber-500 disabled:opacity-50 transition shadow-lg shadow-amber-500/20"
+                className="flex items-center gap-2 rounded-md bg-sky-600 hover:bg-sky-500 px-5 py-2 text-xs font-semibold text-white transition disabled:opacity-50"
               >
                 {savingAiConfig ? (
                   <>
-                    <Loader2 className="h-4 w-4 animate-spin text-black" />
-                    <span>جاري حفظ الإعدادات...</span>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>جاري الحفظ...</span>
                   </>
                 ) : (
                   <>
-                    <CheckCircle className="h-4 w-4 text-black" />
-                    <span>حفظ وتطبيق إعدادات الذكاء الاصطناعي</span>
+                    <CheckCircle className="h-4 w-4" />
+                    <span>حفظ وتطبيق النماذج</span>
                   </>
                 )}
               </button>

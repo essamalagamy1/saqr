@@ -89,23 +89,35 @@ class AIEngine {
       }
 
       try {
-        const session = await ort.InferenceSession.create(resolved, {
-          executionProviders: providers,
-          graphOptimizationLevel: 'all',
-        });
-        this.sessions[key] = session;
-        console.log(`[AI] 🚀 Loaded ${key} model from ${resolved}`);
+        // Read into buffer to support virtual Electron asar archives seamlessly
+        const modelBuffer = fs.readFileSync(resolved);
+        try {
+          const session = await ort.InferenceSession.create(modelBuffer, {
+            executionProviders: providers,
+            graphOptimizationLevel: 'all',
+          });
+          this.sessions[key] = session;
+          console.log(`[AI] 🚀 Loaded ${key} model from Buffer (${(modelBuffer.length / 1024 / 1024).toFixed(1)}MB)`);
+        } catch (bufErr) {
+          // Fallback to CPU with Buffer or path
+          const session = await ort.InferenceSession.create(modelBuffer, {
+            executionProviders: ['cpu'],
+            graphOptimizationLevel: 'all',
+          });
+          this.sessions[key] = session;
+          console.log(`[AI] ✅ Loaded ${key} model on CPU Buffer (${(modelBuffer.length / 1024 / 1024).toFixed(1)}MB)`);
+        }
       } catch (err) {
-        // Fallback to CPU only if DirectML fails
+        // Fallback to direct path if Buffer read failed
         try {
           const session = await ort.InferenceSession.create(resolved, {
             executionProviders: ['cpu'],
             graphOptimizationLevel: 'all',
           });
           this.sessions[key] = session;
-          console.log(`[AI] ✅ Loaded ${key} model on CPU from ${resolved}`);
-        } catch (cpuErr) {
-          console.error(`[AI] Failed to load ${key}:`, cpuErr.message);
+          console.log(`[AI] ✅ Loaded ${key} model via path from ${resolved}`);
+        } catch (fallbackErr) {
+          console.error(`[AI] Failed to load ${key}:`, fallbackErr.message);
         }
       }
     }

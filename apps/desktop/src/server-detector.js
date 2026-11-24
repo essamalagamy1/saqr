@@ -13,8 +13,7 @@ const WEB_BASE = 'http://127.0.0.1:3000';
 class ServerDetector {
   constructor() {
     this.ai = new AIEngine({
-      modelPath: path.join(__dirname, '..', 'models', 'yolox_s.onnx'),
-      confThreshold: 0.30, // Calibrated for CCTV surveillance (no phantom boxes)
+      confThreshold: 0.30,
       nmsThreshold: 0.45,
     });
     this.pipeline = new DetectionPipeline();
@@ -152,45 +151,56 @@ class ServerDetector {
           const frame = await this.fetchFrame(cam);
           if (!frame || frame.length < 8000) continue;
 
-          // 1. Run YOLOX Primary Object Detection
-          const detections = await this.ai.detect(frame, cam.id);
-          const persons = detections.filter(d => d.label === 'person');
+          // Parse active models from camera config or default to all 3
+          let activeModels = ['face_mask', 'gloves', 'phone'];
+          if (cam.activeModels && Array.isArray(cam.activeModels)) {
+            activeModels = cam.activeModels;
+          } else if (cam.config) {
+            try {
+              const cfg = typeof cam.config === 'string' ? JSON.parse(cam.config) : cam.config;
+              if (cfg.activeModels) activeModels = cfg.activeModels;
+              else if (cfg.enabled_services) {
+                activeModels = [];
+                if (cfg.enabled_services.includes('kitchen_ppe') || cfg.enabled_services.includes('face_mask')) activeModels.push('face_mask');
+                if (cfg.enabled_services.includes('gloves')) activeModels.push('gloves');
+                if (cfg.enabled_services.includes('phone_usage') || cfg.enabled_services.includes('phone')) activeModels.push('phone');
+                if (activeModels.length === 0) activeModels = ['face_mask', 'gloves', 'phone'];
+              }
+            } catch {}
+          }
+
+          // 1. Run Multi-Model Detection
+          const { detections, frameWidth, frameHeight } = await this.ai.detect(frame, activeModels);
+          if (!detections || detections.length === 0) continue;
+
+          const fw = frameWidth || 1280;
+          const fh = frameHeight || 720;
           const now = Date.now();
 
-          if (persons.length === 0) continue;
-
-          const fw = detections[0]?.frameWidth || 1280;
-          const fh = detections[0]?.frameHeight || 720;
-
-          // 2. Update Person Tracks with ByteTrack
-          const activeTracks = this.pipeline.updatePersonTracks(cam.id, persons, now, fw);
-          if (activeTracks.length === 0) continue;
-
-          // 3. Evaluate AI Services Candidates with Priority Arbitration
-          const winner = await this.pipeline.evaluateCandidates(
-            cam,
-            activeTracks,
+          // 2. Evaluate Violations
+          const events = this.pipeline.evaluateDetections(
+            { ...cam, activeModels },
             detections,
             now,
             fw,
-            fh,
-            frame,
-            this.ai
+            fh
           );
 
-          if (!winner) continue;
+          if (!events || events.length === 0) continue;
 
-          // 4. Upload Snapshot and Post Detection
+          // 3. Upload Snapshot and Post Detection
           const snapshotUrl = await this.uploadSnapshot(frame, cam.id);
-          await this.postDetection(cam, {
-            type: winner.type,
-            severity: winner.severity,
-            confidence: winner.confidence,
-            boundingBoxes: winner.boundingBoxes,
-            snapshotUrl,
-            serviceSlug: winner.serviceSlug,
-            metadata: winner.metadata
-          });
+          for (const ev of events) {
+            await this.postDetection(cam, {
+              type: ev.type,
+              severity: ev.severity,
+              confidence: ev.confidence,
+              boundingBoxes: ev.boundingBoxes,
+              snapshotUrl,
+              serviceSlug: ev.serviceSlug,
+              metadata: ev.metadata
+            });
+          }
         }
       } catch (err) {
         console.warn('[SERVER-AI] Loop error:', err.message);
