@@ -1,0 +1,19 @@
+{
+  "models": {
+    "gloves": {
+      "studioTrained": false,
+      "restoredFrom": "gloves_1795567984_job_1795567829865_e1703d",
+      "updatedAt": "2026-11-25T00:53:09.182Z",
+      "sha256": "ad6361be81990ba97d3e2266ae2fd9ae64fbfe7ac6af009bd5fee618981ca421"
+    },
+    "phone": {
+      "studioTrained": true,
+      "lastJobId": "job_1795570372795_9f8cde",
+      "updatedAt": "2026-11-25T01:35:36.812348+00:00",
+      "sha256": "6bb233176f30185045ec3d8492befa628c92579385d59dbefe138fd288dd7007",
+      "backupDir": "storage/training_studio/backups/phone_1795570536_job_1795570372795_9f8cde",
+      "phoneMode": "custom_only",
+      "conf": 0.22
+    }
+  }
+}

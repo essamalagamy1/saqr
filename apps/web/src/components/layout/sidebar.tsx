@@ -14,7 +14,8 @@ import {
   CheckSquare,
   ShieldCheck,
   X,
-  Radio
+  Radio,
+  Sparkles
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
@@ -80,6 +81,12 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           href: '/ai-services', 
           icon: BrainCircuit,
           badge: '3 نماذج'
+        },
+        {
+          label: 'مختبر التدريب المخصص',
+          href: '/training',
+          icon: Sparkles,
+          badge: 'GPU',
         },
       ],
     },

@@ -163,6 +163,13 @@ export default function AIServicesPage() {
             <RefreshCw className="h-3.5 w-3.5" />
           </button>
           <Link
+            href="/training"
+            className="flex items-center gap-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 px-3.5 py-1.5 text-xs font-semibold text-white transition"
+          >
+            <BrainCircuit className="h-3.5 w-3.5" />
+            <span>مختبر التدريب المخصص (GPU)</span>
+          </Link>
+          <Link
             href="/cameras"
             className="flex items-center gap-1.5 rounded-md bg-sky-600 hover:bg-sky-500 px-3.5 py-1.5 text-xs font-semibold text-white transition"
           >

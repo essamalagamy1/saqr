@@ -5,10 +5,12 @@
 const AIEngine = require('./ai-engine');
 const DetectionPipeline = require('./detection-pipeline');
 const http = require('http');
+const fs = require('fs');
 const path = require('path');
 
 const API_BASE = 'http://localhost:8080/api/v1';
 const WEB_BASE = 'http://127.0.0.1:3000';
+const TRAINING_LOCK_PATH = path.resolve(__dirname, '..', '..', '..', 'storage', 'training_studio', 'active.lock');
 
 class ServerDetector {
   constructor() {
@@ -20,6 +22,7 @@ class ServerDetector {
     this.token = null;
     this.running = false;
     this.isLoopRunning = false;
+    this.sweepCount = 0;
     this.edgeActiveCameras = new Map(); // cameraId -> lastSeenTimestamp
   }
 
@@ -125,17 +128,22 @@ class ServerDetector {
     await this.ai.init();
     this.running = true;
 
-    // Detection loop: runs every 3.5s to preserve server CPU
-    setInterval(async () => {
+    // Detection loop: self-scheduling after each sweep completes (1.5s rest)
+    const runSweep = async () => {
       if (!this.running || this.isLoopRunning) return;
       this.isLoopRunning = true;
       try {
+        await this.ai.reloadIfUpdated();
         if (!this.token) await this.login();
         const camsRes = await fetch(`${API_BASE}/cameras/`, {
           headers: { 'Authorization': `Bearer ${this.token}` }
         });
         const camsData = await camsRes.json();
         const cameras = camsData.data || [];
+        this.sweepCount += 1;
+        let liveFrames = 0;
+        let skippedNoFrame = 0;
+        let detectionsFound = 0;
 
         for (const cam of cameras) {
           // If Edge Agent is actively streaming this camera (< 60s TTL), skip server inference
@@ -149,7 +157,11 @@ class ServerDetector {
           }
 
           const frame = await this.fetchFrame(cam);
-          if (!frame || frame.length < 8000) continue;
+          if (!frame || frame.length < 8000) {
+            skippedNoFrame += 1;
+            continue;
+          }
+          liveFrames += 1;
 
           // Parse active models from camera config strictly based on user selection
           let activeModels = [];
@@ -177,6 +189,7 @@ class ServerDetector {
           // 1. Run Multi-Model Detection
           const { detections, frameWidth, frameHeight } = await this.ai.detect(frame, activeModels);
           if (!detections || detections.length === 0) continue;
+          detectionsFound += detections.length;
 
           const fw = frameWidth || 1280;
           const fh = frameHeight || 720;
@@ -207,12 +220,22 @@ class ServerDetector {
             });
           }
         }
+
+        if (this.sweepCount === 1 || this.sweepCount % 10 === 0) {
+          console.log(`[SERVER-AI] 📡 Sweep #${this.sweepCount}: ${liveFrames} live cameras scanned, ${skippedNoFrame} offline/no-frame, ${detectionsFound} detections`);
+        }
       } catch (err) {
         console.warn('[SERVER-AI] Loop error:', err.message);
       } finally {
         this.isLoopRunning = false;
+        if (this.running) {
+          const isTrainingActive = fs.existsSync(TRAINING_LOCK_PATH);
+          setTimeout(runSweep, isTrainingActive ? 4000 : 1500);
+        }
       }
-    }, 3500);
+    };
+
+    runSweep();
   }
 }
 

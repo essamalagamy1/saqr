@@ -8,7 +8,49 @@
 class DetectionPipeline {
   constructor() {
     this.lastAlerts = new Map(); // `${camId}_${violationType}` -> timestamp
-    this.defaultCooldownMs = 15000; // 15 seconds default cooldown between alerts
+    this.recentHits = new Map(); // `${camId}_${violationType}` -> [{ ts, cx, cy, score }]
+    this.lastAlertSpots = new Map(); // `${camId}_${violationType}` -> { ts, cx, cy }
+    this.defaultCooldownMs = 45000; // 45s default cooldown between repeated alerts
+    this.staticSpotCooldownMs = 120000; // 120s cooldown when repeating on exact same static spot
+    this.consensusWindowMs = 35000; // 35s window for multi-frame temporal verification across multi-camera sweeps
+  }
+
+  /**
+   * Verify that a violation persists across >= 2 recent frames (or has very high confidence >= 0.72)
+   * and apply stricter cooldown if it keeps firing on the exact same stationary spot.
+   */
+  _shouldEmitWithVerification(alertKey, box, score, now, cooldownMs) {
+    const cx = box ? ((box[0] + box[2]) / 2) : 0;
+    const cy = box ? ((box[1] + box[3]) / 2) : 0;
+
+    // 1. Temporal Consensus Verification
+    const history = (this.recentHits.get(alertKey) || []).filter(h => now - h.ts <= this.consensusWindowMs);
+    history.push({ ts: now, cx, cy, score });
+    this.recentHits.set(alertKey, history);
+
+    if (score < 0.72 && history.length < 2) {
+      return false;
+    }
+
+    // 2. Cooldown & Static-Spot Anti-Loop Check
+    const lastSpot = this.lastAlertSpots.get(alertKey);
+    const lastAlert = this.lastAlerts.get(alertKey);
+    let effectiveCooldown = cooldownMs;
+
+    if (lastSpot && box) {
+      const movedPx = Math.hypot(cx - lastSpot.cx, cy - lastSpot.cy);
+      if (movedPx < 25) {
+        effectiveCooldown = Math.max(cooldownMs, this.staticSpotCooldownMs);
+      }
+    }
+
+    if (lastAlert !== undefined && (now - lastAlert < effectiveCooldown)) {
+      return false;
+    }
+
+    this.lastAlerts.set(alertKey, now);
+    this.lastAlertSpots.set(alertKey, { ts: now, cx, cy });
+    return true;
   }
 
   toPercentBox(box, label, color, score, frameWidth, frameHeight) {
@@ -46,11 +88,8 @@ class DetectionPipeline {
       if (maskViolations.length > 0) {
         const topViolation = maskViolations[0];
         const alertKey = `${camera.id}_face_mask_${topViolation.status}`;
-        const lastAlert = this.lastAlerts.get(alertKey) || 0;
 
-        if (now - lastAlert >= cooldown) {
-          this.lastAlerts.set(alertKey, now);
-
+        if (this._shouldEmitWithVerification(alertKey, topViolation.box, topViolation.score, now, cooldown)) {
           const typeName = topViolation.status === 'NO_MASK'
             ? 'سلامة الغذاء: عدم ارتداء الكمامة في بيئة العمل'
             : 'سلامة الغذاء: ارتداء الكمامة بطريقة غير صحيحة';
@@ -60,7 +99,7 @@ class DetectionPipeline {
             type: typeName,
             severity: topViolation.status === 'NO_MASK' ? 'high' : 'medium',
             confidence: topViolation.score,
-            boundingBoxes: maskViolations.map(v =>
+            boundingBoxes: maskViolations.slice(0, 2).map(v =>
               this.toPercentBox(v.box, v.label, v.color, v.score, fw, fh)
             ),
             metadata: {
@@ -78,26 +117,24 @@ class DetectionPipeline {
     if (activeModels.includes('gloves')) {
       const bareHands = detections.filter(d => d.model === 'gloves' && d.status === 'BARE_HAND_VIOLATION');
       if (bareHands.length > 0) {
-        const topBareHand = bareHands[0];
+        const topHands = bareHands.slice(0, 2); // At most 2 hands per event
+        const topBareHand = topHands[0];
         const alertKey = `${camera.id}_gloves_bare_hand`;
-        const lastAlert = this.lastAlerts.get(alertKey) || 0;
 
-        if (now - lastAlert >= cooldown) {
-          this.lastAlerts.set(alertKey, now);
-
+        if (this._shouldEmitWithVerification(alertKey, topBareHand.box, topBareHand.score, now, cooldown)) {
           candidates.push({
             serviceSlug: 'kitchen_ppe',
             type: 'سلامة الغذاء: لمس الأغذية بدون قفازات (يد مكشوفة)',
             severity: 'high',
             confidence: topBareHand.score,
-            boundingBoxes: bareHands.map(h =>
-              this.toPercentBox(h.box, h.label, h.color, h.score, fw, fh)
+            boundingBoxes: topHands.map(h =>
+              this.toPercentBox(h.box, h.label || 'يد بدون قفازات', h.color, h.score, fw, fh)
             ),
             metadata: {
               model: 'gloves',
               status: 'BARE_HAND_VIOLATION',
               zone: camera.zone_name || 'منطقة التحضير والأغذية',
-              count: bareHands.length
+              count: topHands.length
             }
           });
         }
@@ -110,17 +147,14 @@ class DetectionPipeline {
       if (phones.length > 0) {
         const topPhone = phones[0];
         const alertKey = `${camera.id}_phone_usage`;
-        const lastAlert = this.lastAlerts.get(alertKey) || 0;
 
-        if (now - lastAlert >= cooldown) {
-          this.lastAlerts.set(alertKey, now);
-
+        if (this._shouldEmitWithVerification(alertKey, topPhone.box, topPhone.score, now, cooldown)) {
           candidates.push({
             serviceSlug: 'phone_usage',
             type: 'انشغال العامل: استخدام الهاتف المحمول أثناء العمل',
             severity: 'medium',
             confidence: topPhone.score,
-            boundingBoxes: phones.map(p =>
+            boundingBoxes: phones.slice(0, 2).map(p =>
               this.toPercentBox(p.box, p.label, p.color, p.score, fw, fh)
             ),
             metadata: {

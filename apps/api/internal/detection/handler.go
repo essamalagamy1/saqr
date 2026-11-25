@@ -375,7 +375,8 @@ func (h *Handler) Acknowledge(c *fiber.Ctx) error {
 
 	_, err := h.db.Exec(c.Context(), `
 		UPDATE detections 
-		SET is_acknowledged = true, acknowledged_by = $1, is_read = true, is_pinned = true, pinned_reason = 'acknowledged', pinned_at = NOW() 
+		SET is_acknowledged = true, acknowledged_by = $1, is_read = true, is_pinned = true, pinned_reason = 'acknowledged', pinned_at = NOW(),
+		    feedback_type = 'verified_positive', training_status = 'pending'
 		WHERE id = $2 AND company_id = $3
 	`, body.AcknowledgedBy, id, companyID)
 	if err != nil {
@@ -462,8 +463,8 @@ func (h *Handler) TrainingStats(c *fiber.Ctx) error {
 	var totalReviewed, verifiedCount, falseAlarmCount int
 	_ = h.db.QueryRow(c.Context(), `
 		SELECT 
-			COUNT(CASE WHEN feedback_type IN ('verified_positive', 'false_positive') THEN 1 END),
-			COUNT(CASE WHEN feedback_type = 'verified_positive' THEN 1 END),
+			COUNT(CASE WHEN feedback_type IN ('verified_positive', 'false_positive') OR is_acknowledged = true THEN 1 END),
+			COUNT(CASE WHEN feedback_type = 'verified_positive' OR (is_acknowledged = true AND COALESCE(feedback_type, '') != 'false_positive') THEN 1 END),
 			COUNT(CASE WHEN feedback_type = 'false_positive' THEN 1 END)
 		FROM detections
 		WHERE company_id = $1
@@ -495,7 +496,7 @@ func (h *Handler) ExportDataset(c *fiber.Ctx) error {
 	var count int
 	_ = h.db.QueryRow(c.Context(), `
 		SELECT COUNT(*) FROM detections 
-		WHERE company_id = $1 AND feedback_type IN ('verified_positive', 'false_positive')
+		WHERE company_id = $1 AND (feedback_type IN ('verified_positive', 'false_positive') OR is_acknowledged = true)
 	`, companyID).Scan(&count)
 
 	return c.JSON(fiber.Map{

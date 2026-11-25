@@ -190,21 +190,32 @@ function getDetectionDetails(type: string, severity: string) {
   };
 }
 
+// Clean floating bounding box label to prevent wide, colliding badges over images
+function cleanBoxLabel(rawLabel?: string): string {
+  if (!rawLabel) return 'مخالفة';
+  const label = rawLabel.trim();
+  if (label.includes('قفاز') || label.includes('يد مكشوفة') || label.includes('يد بدون قفازات')) return 'يد بدون قفازات';
+  if (label.includes('كمام') || label.includes('ماسك') || label.includes('وجه مكشوف')) return 'بدون كمامة';
+  if (label.includes('هاتف') || label.includes('جوال') || label.includes('phone')) return 'استخدام هاتف';
+  if (label.includes('شخص') || label.includes('عامل') || label.includes('Person')) return 'عامل';
+  return label.length > 18 ? label.slice(0, 18) : label;
+}
+
+// Show each distinct violation label at most once per snapshot and avoid overlapping badges
+function shouldShowBoxBadge(boxes: BoundingBox[], idx: number): boolean {
+  const current = boxes[idx];
+  return !boxes.slice(0, idx).some(prev =>
+    prev.label === current.label ||
+    (Math.abs(prev.x - current.x) < 22 && Math.abs(prev.y - current.y) < 12)
+  );
+}
+
 // Parse bounding boxes safely from various formats into percentages
 function parseBoundingBoxes(rawBoxes: any, detectionType: string, confidence: number): BoundingBox[] {
   const details = getDetectionDetails(detectionType, 'medium');
 
   if (!rawBoxes) {
-    return [
-      {
-        x: 32,
-        y: 20,
-        width: 36,
-        height: 60,
-        label: details.tagEn,
-        color: details.accentColor
-      }
-    ];
+    return [];
   }
 
   try {
@@ -218,7 +229,7 @@ function parseBoundingBoxes(rawBoxes: any, detectionType: string, confidence: nu
 
       const colors = ['#3b82f6', '#06b6d4', '#10b981', '#a855f7', '#f59e0b', '#ec4899'];
 
-      return parsed.map((item: any, idx: number) => {
+      const rawList: BoundingBox[] = parsed.map((item: any, idx: number) => {
         // Case 0: item already has direct percentage coordinates
         if (typeof item === 'object' && item !== null && typeof item.x === 'number' && typeof item.width === 'number') {
           const mult = (item.x <= 1.0 && item.width <= 1.0 && (item.y ?? 0) <= 1.0 && (item.height ?? 0) <= 1.0) ? 100 : 1;
@@ -231,7 +242,7 @@ function parseBoundingBoxes(rawBoxes: any, detectionType: string, confidence: nu
             y: top,
             width,
             height,
-            label: item.label || details.tagEn,
+            label: cleanBoxLabel(item.label || details.tagEn),
             color: item.color || details.accentColor
           };
         }
@@ -252,7 +263,7 @@ function parseBoundingBoxes(rawBoxes: any, detectionType: string, confidence: nu
               y: top,
               width,
               height,
-              label: item.label || (parsed.length === 1 ? details.tagEn : `Person ${idx + 1}`),
+              label: cleanBoxLabel(item.label || (parsed.length === 1 ? details.tagEn : `Person ${idx + 1}`)),
               color: item.color || (parsed.length === 1 ? details.accentColor : colors[idx % colors.length])
             };
           }
@@ -289,7 +300,7 @@ function parseBoundingBoxes(rawBoxes: any, detectionType: string, confidence: nu
             y: top,
             width,
             height,
-            label: item.label || (parsed.length === 1 ? details.tagEn : `Person ${idx + 1}`),
+            label: cleanBoxLabel(item.label || (parsed.length === 1 ? details.tagEn : `Person ${idx + 1}`)),
             color: item.color || (parsed.length === 1 ? details.accentColor : colors[idx % colors.length])
           };
         }
@@ -317,28 +328,36 @@ function parseBoundingBoxes(rawBoxes: any, detectionType: string, confidence: nu
             y: Math.max(0, Math.min(100, (rawY / frameH) * 100)),
             width: Math.max(3, Math.min(100, (rawW / frameW) * 100)),
             height: Math.max(4, Math.min(100, (rawH / frameH) * 100)),
-            label: item.label || details.tagEn,
+            label: cleanBoxLabel(item.label || details.tagEn),
             color: item.color || details.accentColor
           };
         }
 
-        return { x: 30, y: 20, width: 40, height: 60, label: details.tagEn, color: details.accentColor };
+        return { x: 30, y: 20, width: 40, height: 60, label: cleanBoxLabel(details.tagEn), color: details.accentColor };
       });
+
+      // Spatial deduplication: avoid overlapping candidate boxes (closer than 7% distance)
+      const deduplicated: BoundingBox[] = [];
+      for (const b of rawList) {
+        const cx = b.x + b.width / 2;
+        const cy = b.y + b.height / 2;
+        const isDuplicate = deduplicated.some(prev => {
+          const pcx = prev.x + prev.width / 2;
+          const pcy = prev.y + prev.height / 2;
+          return Math.hypot(cx - pcx, cy - pcy) < 7;
+        });
+        if (!isDuplicate) {
+          deduplicated.push(b);
+        }
+      }
+
+      return deduplicated.length > 0 ? deduplicated.slice(0, 3) : rawList.slice(0, 3);
     }
   } catch (e) {
     console.warn('Failed to parse bounding boxes:', e);
   }
 
-  return [
-    {
-      x: 32,
-      y: 20,
-      width: 36,
-      height: 60,
-      label: details.tagEn,
-      color: details.accentColor
-    }
-  ];
+  return [];
 }
 
 function DetectionsContent() {
@@ -913,7 +932,7 @@ function DetectionsContent() {
                       </span>
                     </div>
 
-                    {/* Drawn Bounding Boxes with Tag Badges */}
+                    {/* Drawn Bounding Boxes with Deduplicated Tag Badges */}
                     {boxes.map((box, bIdx) => (
                       <div
                         key={bIdx}
@@ -927,16 +946,17 @@ function DetectionsContent() {
                           backgroundColor: `${box.color}15`,
                         }}
                       >
-                        {/* Attached Tag Label */}
-                        <div 
-                          className="absolute -top-6 left-0 bg-slate-950/90 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-md border border-slate-700/80 flex items-center gap-1.5 whitespace-nowrap"
-                        >
-                          <span 
-                            className="w-1.5 h-1.5 rounded-full animate-pulse"
-                            style={{ backgroundColor: box.color }}
-                          />
-                          <span>{box.label}</span>
-                        </div>
+                        {shouldShowBoxBadge(boxes, bIdx) && (
+                          <div 
+                            className={`absolute ${box.y < 14 ? 'top-1' : '-top-6'} left-0 bg-slate-950/90 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-md border border-slate-700/80 flex items-center gap-1.5 whitespace-nowrap`}
+                          >
+                            <span 
+                              className="w-1.5 h-1.5 rounded-full animate-pulse"
+                              style={{ backgroundColor: box.color }}
+                            />
+                            <span>{box.label}</span>
+                          </div>
+                        )}
                       </div>
                     ))}
 
@@ -1251,30 +1271,35 @@ function DetectionsContent() {
                 )}
 
                 {/* Accurate Bounding Box Overlay */}
-                {showBoundingBoxes && parseBoundingBoxes(inspectItem.bounding_boxes, inspectItem.type, inspectItem.confidence).map((box, idx) => (
-                  <div
-                    key={idx}
-                    className="absolute rounded border-2 transition-all pointer-events-none"
-                    style={{
-                      left: `${box.x}%`,
-                      top: `${box.y}%`,
-                      width: `${box.width}%`,
-                      height: `${box.height}%`,
-                      borderColor: box.color,
-                      backgroundColor: `${box.color}15`,
-                    }}
-                  >
-                    <div 
-                      className="absolute -top-7 left-0 bg-slate-950/95 text-white text-[11px] font-bold px-2 py-0.5 rounded shadow-lg border border-slate-700 flex items-center gap-1.5 whitespace-nowrap"
+                {showBoundingBoxes && (() => {
+                  const boxes = parseBoundingBoxes(inspectItem.bounding_boxes, inspectItem.type, inspectItem.confidence);
+                  return boxes.map((box, idx) => (
+                    <div
+                      key={idx}
+                      className="absolute rounded border-2 transition-all pointer-events-none"
+                      style={{
+                        left: `${box.x}%`,
+                        top: `${box.y}%`,
+                        width: `${box.width}%`,
+                        height: `${box.height}%`,
+                        borderColor: box.color,
+                        backgroundColor: `${box.color}15`,
+                      }}
                     >
-                      <span 
-                        className="w-2 h-2 rounded-full animate-pulse"
-                        style={{ backgroundColor: box.color }}
-                      />
-                      <span>{box.label}</span>
+                      {shouldShowBoxBadge(boxes, idx) && (
+                        <div 
+                          className={`absolute ${box.y < 10 ? 'top-1' : '-top-7'} left-0 bg-slate-950/95 text-white text-[11px] font-bold px-2 py-0.5 rounded shadow-lg border border-slate-700 flex items-center gap-1.5 whitespace-nowrap`}
+                        >
+                          <span 
+                            className="w-2 h-2 rounded-full animate-pulse"
+                            style={{ backgroundColor: box.color }}
+                          />
+                          <span>{box.label}</span>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  ));
+                })()}
               </div>
             </div>
 

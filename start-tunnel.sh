@@ -52,6 +52,15 @@ else
     echo "✅ خادم الويب (Next.js) يعمل بالفعل وجاهز على المنفذ 3000."
 fi
 
+# 2.5. فحص وتشغيل محرك الرصد الذكي (server-detector.js) إذا لم يكن يعمل
+if ! pgrep -f "server-detector\.js" >/dev/null 2>&1; then
+    echo "⏳ جاري تشغيل محرك الذكاء الاصطناعي للرصد (server-detector)..."
+    cd "$SCRIPT_DIR" && nohup node apps/desktop/src/server-detector.js > /tmp/saqr-ai.log 2>&1 < /dev/null &
+    sleep 2
+else
+    echo "✅ محرك الذكاء الاصطناعي للرصد (server-detector) يعمل بالفعل."
+fi
+
 # 3. إنهاء أي نفق قديم متصل بنفس المنفذ لتجنب التعارض
 pkill -f "cloudflared tunnel.*http://localhost:3000" 2>/dev/null
 sleep 1

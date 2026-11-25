@@ -158,6 +158,9 @@ class AgentRunner {
         return;
       }
 
+      if (typeof this.aiEngine.reloadIfUpdated === 'function') {
+        await this.aiEngine.reloadIfUpdated();
+      }
       const { detections, frameWidth, frameHeight } = await this.aiEngine.detect(frameBuffer, activeModels);
 
       if (!detections || detections.length === 0) {
