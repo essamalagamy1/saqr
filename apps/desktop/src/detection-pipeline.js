@@ -5,14 +5,62 @@
 // 3. Mobile Phone Usage (Handheld Phone in work area)
 // Strictly eliminates all generic presence/loitering noise as requested.
 
+const { MultiCameraTracker } = require('./tracker');
+
 class DetectionPipeline {
   constructor() {
-    this.lastAlerts = new Map(); // `${camId}_${violationType}` -> timestamp
-    this.recentHits = new Map(); // `${camId}_${violationType}` -> [{ ts, cx, cy, score }]
-    this.lastAlertSpots = new Map(); // `${camId}_${violationType}` -> { ts, cx, cy }
+    this.tracker = new MultiCameraTracker();
+    this.lastAlerts = new Map(); // `${camId}_t${trackId}_${violationType}` -> timestamp
+    this.recentHits = new Map(); // `${camId}_t${trackId}_${violationType}` -> [{ ts, cx, cy, score }]
+    this.lastAlertSpots = new Map(); // `${camId}_t${trackId}_${violationType}` -> { ts, cx, cy }
     this.defaultCooldownMs = 45000; // 45s default cooldown between repeated alerts
     this.staticSpotCooldownMs = 120000; // 120s cooldown when repeating on exact same static spot
     this.consensusWindowMs = 35000; // 35s window for multi-frame temporal verification across multi-camera sweeps
+  }
+
+  /**
+   * Match a PPE/violation box to the best active tracked person ID in the frame.
+   */
+  _matchTrackId(box, trackedPersons) {
+    if (!box || !trackedPersons || trackedPersons.length === 0) return null;
+    const cx = (box[0] + box[2]) / 2;
+    const cy = (box[1] + box[3]) / 2;
+
+    let bestId = null;
+    let bestDist = Infinity;
+    for (const p of trackedPersons) {
+      const [px1, py1, px2, py2] = p.box;
+      const pw = px2 - px1;
+      const ph = py2 - py1;
+      if (cx >= px1 - pw * 0.12 && cx <= px2 + pw * 0.12 && cy >= py1 - ph * 0.12 && cy <= py2 + ph * 0.12) {
+        const pcx = (px1 + px2) / 2;
+        const pcy = (py1 + py2) / 2;
+        const dist = Math.hypot(cx - pcx, cy - pcy);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestId = p.trackId;
+        }
+      }
+    }
+    return bestId;
+  }
+
+  /**
+   * Group violations by matched trackId so each tracked person has independent
+   * temporal verification and cooldown state.
+   */
+  _groupByTrack(violations, trackedPersons) {
+    if (!trackedPersons || trackedPersons.length === 0) {
+      return [{ trackId: null, items: violations }];
+    }
+    const groups = new Map();
+    for (const v of violations) {
+      const tid = this._matchTrackId(v.box, trackedPersons);
+      const key = tid === null ? 'untracked' : String(tid);
+      if (!groups.has(key)) groups.set(key, { trackId: tid, items: [] });
+      groups.get(key).items.push(v);
+    }
+    return Array.from(groups.values());
   }
 
   /**
@@ -73,7 +121,11 @@ class DetectionPipeline {
    * Process frame detections and arbitrate candidates based on camera active models.
    * Multiple models can run and alert if violations occur.
    */
-  evaluateDetections(camera, detections, now, fw = 1280, fh = 720) {
+  evaluateDetections(camera, detections, now, fw = 1280, fh = 720, persons = []) {
+    const trackedPersons = (persons && persons.length > 0)
+      ? this.tracker.update(camera.id, persons, now)
+      : [];
+
     if (!detections || detections.length === 0) return [];
 
     const activeModels = camera.activeModels || [];
@@ -81,13 +133,14 @@ class DetectionPipeline {
 
     const candidates = [];
     const cooldown = (camera.cooldown_seconds ? camera.cooldown_seconds * 1000 : this.defaultCooldownMs);
+    const keyScope = (tid, suffix) => (tid !== null ? `${camera.id}_t${tid}_${suffix}` : `${camera.id}_${suffix}`);
 
     // 1. Check Face Mask Violations (NO_MASK or INCORRECT_MASK)
     if (activeModels.includes('face_mask')) {
       const maskViolations = detections.filter(d => d.model === 'face_mask' && d.isViolation);
-      if (maskViolations.length > 0) {
-        const topViolation = maskViolations[0];
-        const alertKey = `${camera.id}_face_mask_${topViolation.status}`;
+      for (const { trackId, items } of this._groupByTrack(maskViolations, trackedPersons)) {
+        const topViolation = items[0];
+        const alertKey = keyScope(trackId, `face_mask_${topViolation.status}`);
 
         if (this._shouldEmitWithVerification(alertKey, topViolation.box, topViolation.score, now, cooldown)) {
           const typeName = topViolation.status === 'NO_MASK'
@@ -99,14 +152,15 @@ class DetectionPipeline {
             type: typeName,
             severity: topViolation.status === 'NO_MASK' ? 'high' : 'medium',
             confidence: topViolation.score,
-            boundingBoxes: maskViolations.slice(0, 2).map(v =>
+            boundingBoxes: items.slice(0, 2).map(v =>
               this.toPercentBox(v.box, v.label, v.color, v.score, fw, fh)
             ),
             metadata: {
               model: 'face_mask',
               status: topViolation.status,
+              track_id: trackId,
               zone: camera.zone_name || 'عام',
-              count: maskViolations.length
+              count: items.length
             }
           });
         }
@@ -116,10 +170,10 @@ class DetectionPipeline {
     // 2. Check Gloves & Bare Hand Violations (BARE_HAND_VIOLATION)
     if (activeModels.includes('gloves')) {
       const bareHands = detections.filter(d => d.model === 'gloves' && d.status === 'BARE_HAND_VIOLATION');
-      if (bareHands.length > 0) {
-        const topHands = bareHands.slice(0, 2); // At most 2 hands per event
+      for (const { trackId, items } of this._groupByTrack(bareHands, trackedPersons)) {
+        const topHands = items.slice(0, 2); // At most 2 hands per person event
         const topBareHand = topHands[0];
-        const alertKey = `${camera.id}_gloves_bare_hand`;
+        const alertKey = keyScope(trackId, 'gloves_bare_hand');
 
         if (this._shouldEmitWithVerification(alertKey, topBareHand.box, topBareHand.score, now, cooldown)) {
           candidates.push({
@@ -133,6 +187,7 @@ class DetectionPipeline {
             metadata: {
               model: 'gloves',
               status: 'BARE_HAND_VIOLATION',
+              track_id: trackId,
               zone: camera.zone_name || 'منطقة التحضير والأغذية',
               count: topHands.length
             }
@@ -144,9 +199,9 @@ class DetectionPipeline {
     // 3. Check Mobile Phone Usage (PHONE_DETECTED)
     if (activeModels.includes('phone')) {
       const phones = detections.filter(d => d.model === 'phone' && d.status === 'PHONE_DETECTED');
-      if (phones.length > 0) {
-        const topPhone = phones[0];
-        const alertKey = `${camera.id}_phone_usage`;
+      for (const { trackId, items } of this._groupByTrack(phones, trackedPersons)) {
+        const topPhone = items[0];
+        const alertKey = keyScope(trackId, 'phone_usage');
 
         if (this._shouldEmitWithVerification(alertKey, topPhone.box, topPhone.score, now, cooldown)) {
           candidates.push({
@@ -154,14 +209,15 @@ class DetectionPipeline {
             type: 'انشغال العامل: استخدام الهاتف المحمول أثناء العمل',
             severity: 'medium',
             confidence: topPhone.score,
-            boundingBoxes: phones.slice(0, 2).map(p =>
+            boundingBoxes: items.slice(0, 2).map(p =>
               this.toPercentBox(p.box, p.label, p.color, p.score, fw, fh)
             ),
             metadata: {
               model: 'phone',
               status: 'PHONE_DETECTED',
+              track_id: trackId,
               zone: camera.zone_name || 'عام',
-              count: phones.length
+              count: items.length
             }
           });
         }

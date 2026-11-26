@@ -50,10 +50,16 @@ class ServerDetector {
     const url = `${WEB_BASE}/api/cameras/${camId}/frame?ip=${encodeURIComponent(ip)}&ch=${encodeURIComponent(ch)}`;
 
     return new Promise((resolve) => {
-      http.get(url, (res) => {
-        if (res.statusCode !== 200) return resolve(null);
+      const req = http.get(url, (res) => {
+        if (res.statusCode !== 200) {
+          res.resume();
+          return resolve(null);
+        }
         const contentType = res.headers['content-type'] || '';
-        if (!contentType.includes('image/jpeg')) return resolve(null);
+        if (!contentType.includes('image/jpeg')) {
+          res.resume();
+          return resolve(null);
+        }
 
         // Check if frame came from edge agent and update TTL
         const edgeHeader = res.headers['x-edge-streamed'];
@@ -64,7 +70,12 @@ class ServerDetector {
         const chunks = [];
         res.on('data', c => chunks.push(c));
         res.on('end', () => resolve(Buffer.concat(chunks)));
-      }).on('error', () => resolve(null));
+      });
+      req.setTimeout(3500, () => {
+        req.destroy();
+        resolve(null);
+      });
+      req.on('error', () => resolve(null));
     });
   }
 
@@ -187,7 +198,7 @@ class ServerDetector {
           }
 
           // 1. Run Multi-Model Detection
-          const { detections, frameWidth, frameHeight } = await this.ai.detect(frame, activeModels);
+          const { detections, persons, frameWidth, frameHeight } = await this.ai.detect(frame, activeModels);
           if (!detections || detections.length === 0) continue;
           detectionsFound += detections.length;
 
@@ -201,7 +212,8 @@ class ServerDetector {
             detections,
             now,
             fw,
-            fh
+            fh,
+            persons
           );
 
           if (!events || events.length === 0) continue;

@@ -4,6 +4,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 
 const MODEL_SPECS = {
   coco: {
@@ -104,24 +105,30 @@ class AIEngine {
 
   async _createSessionFromFile(ort, resolved, providers) {
     const modelBuffer = fs.readFileSync(resolved);
+    const cpuCount = os.cpus().length || 4;
+    const intraThreads = Math.max(2, Math.min(4, Math.floor(cpuCount / 2)));
+    const sessionOpts = {
+      executionProviders: providers,
+      graphOptimizationLevel: 'all',
+      intraOpNumThreads: intraThreads,
+      interOpNumThreads: 1,
+      enableMemPattern: true,
+      enableMemReuse: true,
+    };
+    const cpuOpts = {
+      ...sessionOpts,
+      executionProviders: ['cpu'],
+    };
+
     try {
-      const session = await ort.InferenceSession.create(modelBuffer, {
-        executionProviders: providers,
-        graphOptimizationLevel: 'all',
-      });
+      const session = await ort.InferenceSession.create(modelBuffer, sessionOpts);
       return { session, sizeBytes: modelBuffer.length };
     } catch {
       try {
-        const session = await ort.InferenceSession.create(modelBuffer, {
-          executionProviders: ['cpu'],
-          graphOptimizationLevel: 'all',
-        });
+        const session = await ort.InferenceSession.create(modelBuffer, cpuOpts);
         return { session, sizeBytes: modelBuffer.length };
       } catch {
-        const session = await ort.InferenceSession.create(resolved, {
-          executionProviders: ['cpu'],
-          graphOptimizationLevel: 'all',
-        });
+        const session = await ort.InferenceSession.create(resolved, cpuOpts);
         return { session, sizeBytes: modelBuffer.length };
       }
     }
@@ -515,7 +522,8 @@ class AIEngine {
 
   /**
    * Verifies that a detection box belongs to an actual detected person in the frame.
-   * mode: 'face' (upper 58% of person box), 'hand' / 'phone' (within person bounds).
+   * mode: 'face' (upper/head ROI: top 42% of person box),
+   *       'hand' / 'phone' (body/hand ROI: excludes top 14% crown/hair/hat).
    */
   _isInsidePersonRegion(box, persons, mode = 'any') {
     if (!persons || persons.length === 0) return false;
@@ -536,7 +544,7 @@ class AIEngine {
           cx >= (px1 + horizMargin) &&
           cx <= (px2 - horizMargin) &&
           cy >= (py1 - topMargin) &&
-          cy <= (py1 + ph * 0.58)
+          cy <= (py1 + ph * 0.42)
         );
       }
 
@@ -545,7 +553,7 @@ class AIEngine {
       return (
         cx >= (px1 - marginX) &&
         cx <= (px2 + marginX) &&
-        cy >= (py1 - marginY) &&
+        cy >= (py1 + ph * 0.14) &&
         cy <= (py2 + marginY)
       );
     });
@@ -624,7 +632,7 @@ class AIEngine {
     }
     const rawMode = Boolean(options.rawMode);
     if (!frameBuffer || (!rawMode && frameBuffer.length < 5000)) {
-      return { detections: [], frameWidth: 1280, frameHeight: 720 };
+      return { detections: [], persons: [], frameWidth: 1280, frameHeight: 720 };
     }
 
     this._loadManifest();
@@ -643,7 +651,7 @@ class AIEngine {
     });
 
     if (!hasCoco && modelsToRun.length === 0) {
-      return { detections: [], frameWidth: origW, frameHeight: origH };
+      return { detections: [], persons: [], frameWidth: origW, frameHeight: origH };
     }
 
     let cocoPersons = null;
@@ -662,7 +670,7 @@ class AIEngine {
           allDetections.push(...phones);
         }
         if (cocoPersons.length === 0) {
-          return { detections: [], frameWidth: origW, frameHeight: origH };
+          return { detections: [], persons: [], frameWidth: origW, frameHeight: origH };
         }
       } catch (err) {
         console.warn('[AI] Inference error on coco:', err.message);
@@ -860,6 +868,7 @@ class AIEngine {
 
     return {
       detections: verifiedDetections,
+      persons: cocoPersons || [],
       frameWidth: origW,
       frameHeight: origH
     };

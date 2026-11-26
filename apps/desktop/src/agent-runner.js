@@ -161,7 +161,7 @@ class AgentRunner {
       if (typeof this.aiEngine.reloadIfUpdated === 'function') {
         await this.aiEngine.reloadIfUpdated();
       }
-      const { detections, frameWidth, frameHeight } = await this.aiEngine.detect(frameBuffer, activeModels);
+      const { detections, persons, frameWidth, frameHeight } = await this.aiEngine.detect(frameBuffer, activeModels);
 
       if (!detections || detections.length === 0) {
         return;
@@ -177,7 +177,8 @@ class AgentRunner {
         detections,
         now,
         fw,
-        fh
+        fh,
+        persons
       );
 
       if (!events || events.length === 0) {

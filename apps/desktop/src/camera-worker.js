@@ -385,9 +385,18 @@ class CameraWorker {
     let isActive = true;
     let proc = null;
     let reconnectTimer = null;
+    let reconnectAttempts = 0;
+    let healthyFrames = 0;
     let streamBuffer = Buffer.alloc(0);
     const MAX_BUFFER = 10 * 1024 * 1024; // 10MB safety cap
     const targetFps = typeof fps === 'number' && fps > 0 ? fps : 2;
+
+    const getReconnectDelayMs = () => {
+      const base = Math.min(30000, 1000 * Math.pow(2, reconnectAttempts));
+      const jitter = Math.floor(Math.random() * 1000);
+      reconnectAttempts = Math.min(reconnectAttempts + 1, 6);
+      return base + jitter;
+    };
 
     const startPersistentFfmpeg = () => {
       if (!isActive) return;
@@ -416,7 +425,8 @@ class CameraWorker {
       } catch (spawnErr) {
         console.error(`[CAMERA] Failed to spawn persistent FFmpeg for camera ${cameraId}:`, spawnErr.message);
         if (isActive) {
-          reconnectTimer = setTimeout(startPersistentFfmpeg, 4000);
+          const delayMs = getReconnectDelayMs();
+          reconnectTimer = setTimeout(startPersistentFfmpeg, delayMs);
         }
         return;
       }
@@ -451,6 +461,10 @@ class CameraWorker {
           streamBuffer = streamBuffer.slice(frameEnd);
 
           if (frameBuffer.length >= 6000 && isActive) {
+            healthyFrames++;
+            if (healthyFrames >= 3) {
+              reconnectAttempts = 0;
+            }
             try {
               onFrame(cameraId, frameBuffer);
             } catch (frameErr) {
@@ -467,9 +481,11 @@ class CameraWorker {
 
       proc.on('close', (code) => {
         proc = null;
+        healthyFrames = 0;
         if (!isActive) return;
-        console.warn(`[CAMERA] Persistent FFmpeg stream ended for camera ${cameraId} (code=${code}). Reconnecting in 3s... ${lastStderr.slice(-100)}`);
-        reconnectTimer = setTimeout(startPersistentFfmpeg, 3000);
+        const delayMs = getReconnectDelayMs();
+        console.warn(`[CAMERA] Persistent FFmpeg stream ended for camera ${cameraId} (code=${code}). Reconnecting in ${Math.round(delayMs / 1000)}s... ${lastStderr.slice(-100)}`);
+        reconnectTimer = setTimeout(startPersistentFfmpeg, delayMs);
       });
 
       proc.on('error', (err) => {
