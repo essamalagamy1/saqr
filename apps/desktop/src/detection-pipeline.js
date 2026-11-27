@@ -50,6 +50,9 @@ class DetectionPipeline {
    * temporal verification and cooldown state.
    */
   _groupByTrack(violations, trackedPersons) {
+    if (!violations || violations.length === 0) {
+      return [];
+    }
     if (!trackedPersons || trackedPersons.length === 0) {
       return [{ trackId: null, items: violations }];
     }

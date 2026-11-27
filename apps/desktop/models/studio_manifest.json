@@ -8,12 +8,12 @@
     },
     "phone": {
       "studioTrained": true,
-      "lastJobId": "job_1795570372795_9f8cde",
-      "updatedAt": "2026-11-25T01:35:36.812348+00:00",
-      "sha256": "6bb233176f30185045ec3d8492befa628c92579385d59dbefe138fd288dd7007",
-      "backupDir": "storage/training_studio/backups/phone_1795570536_job_1795570372795_9f8cde",
+      "lastJobId": "cctv_phone_multiscale_v2",
+      "updatedAt": "2026-11-26T10:42:07.038727+00:00",
+      "sha256": "e3bc7d6165baea01d2c4900d225be4744d6cf5b1cd8805c290d26f2eecb7a9fe",
+      "backupDir": "storage/training_studio/backups/phone_pre_cctv_upgrade",
       "phoneMode": "custom_only",
-      "conf": 0.22
+      "conf": 0.35
     }
   }
 }

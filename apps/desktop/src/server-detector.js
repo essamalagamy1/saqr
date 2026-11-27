@@ -146,95 +146,107 @@ class ServerDetector {
       try {
         await this.ai.reloadIfUpdated();
         if (!this.token) await this.login();
-        const camsRes = await fetch(`${API_BASE}/cameras/`, {
+        let camsRes = await fetch(`${API_BASE}/cameras/`, {
           headers: { 'Authorization': `Bearer ${this.token}` }
         });
+        if (camsRes.status === 401) {
+          await this.login();
+          camsRes = await fetch(`${API_BASE}/cameras/`, {
+            headers: { 'Authorization': `Bearer ${this.token}` }
+          });
+        }
         const camsData = await camsRes.json();
         const cameras = camsData.data || [];
         this.sweepCount += 1;
         let liveFrames = 0;
         let skippedNoFrame = 0;
         let detectionsFound = 0;
+        let eventsFound = 0;
 
         for (const cam of cameras) {
-          // If Edge Agent is actively streaming this camera (< 60s TTL), skip server inference
-          const edgeLastSeen = this.edgeActiveCameras.get(cam.id);
-          if (edgeLastSeen) {
-            if (Date.now() - edgeLastSeen < 60000) {
-              continue;
-            } else {
-              this.edgeActiveCameras.delete(cam.id); // TTL expired, resume fallback automatically
-            }
-          }
-
-          const frame = await this.fetchFrame(cam);
-          if (!frame || frame.length < 8000) {
-            skippedNoFrame += 1;
-            continue;
-          }
-          liveFrames += 1;
-
-          // Parse active models from camera config strictly based on user selection
-          let activeModels = [];
-          if (Array.isArray(cam.activeModels)) {
-            activeModels = cam.activeModels;
-          } else if (cam.config) {
-            try {
-              const cfg = typeof cam.config === 'string' ? JSON.parse(cam.config) : cam.config;
-              if (Array.isArray(cfg.activeModels)) {
-                activeModels = cfg.activeModels;
-              } else if (Array.isArray(cfg.enabled_services)) {
-                activeModels = [];
-                if (cfg.enabled_services.includes('kitchen_ppe') || cfg.enabled_services.includes('face_mask')) activeModels.push('face_mask');
-                if (cfg.enabled_services.includes('gloves')) activeModels.push('gloves');
-                if (cfg.enabled_services.includes('phone_usage') || cfg.enabled_services.includes('phone')) activeModels.push('phone');
+          try {
+            // If Edge Agent is actively streaming this camera (< 60s TTL), skip server inference
+            const edgeLastSeen = this.edgeActiveCameras.get(cam.id);
+            if (edgeLastSeen) {
+              if (Date.now() - edgeLastSeen < 60000) {
+                continue;
+              } else {
+                this.edgeActiveCameras.delete(cam.id); // TTL expired, resume fallback automatically
               }
-            } catch {}
-          }
+            }
 
-          // If no models are enabled on this camera, skip it immediately!
-          if (!activeModels || activeModels.length === 0) {
-            continue;
-          }
+            const frame = await this.fetchFrame(cam);
+            if (!frame || frame.length < 8000) {
+              skippedNoFrame += 1;
+              continue;
+            }
+            liveFrames += 1;
 
-          // 1. Run Multi-Model Detection
-          const { detections, persons, frameWidth, frameHeight } = await this.ai.detect(frame, activeModels);
-          if (!detections || detections.length === 0) continue;
-          detectionsFound += detections.length;
+            // Parse active models from camera config strictly based on user selection
+            let activeModels = [];
+            if (Array.isArray(cam.activeModels)) {
+              activeModels = cam.activeModels;
+            } else if (cam.config) {
+              try {
+                const cfg = typeof cam.config === 'string' ? JSON.parse(cam.config) : cam.config;
+                if (Array.isArray(cfg.activeModels)) {
+                  activeModels = cfg.activeModels;
+                } else if (Array.isArray(cfg.enabled_services)) {
+                  activeModels = [];
+                  if (cfg.enabled_services.includes('kitchen_ppe') || cfg.enabled_services.includes('face_mask')) activeModels.push('face_mask');
+                  if (cfg.enabled_services.includes('gloves')) activeModels.push('gloves');
+                  if (cfg.enabled_services.includes('phone_usage') || cfg.enabled_services.includes('phone')) activeModels.push('phone');
+                }
+              } catch {}
+            }
 
-          const fw = frameWidth || 1280;
-          const fh = frameHeight || 720;
-          const now = Date.now();
+            // If no models are enabled on this camera, skip it immediately!
+            if (!activeModels || activeModels.length === 0) {
+              continue;
+            }
 
-          // 2. Evaluate Violations
-          const events = this.pipeline.evaluateDetections(
-            { ...cam, activeModels },
-            detections,
-            now,
-            fw,
-            fh,
-            persons
-          );
+            // 1. Run Multi-Model Detection
+            const { detections, persons, frameWidth, frameHeight } = await this.ai.detect(frame, activeModels);
+            if (!detections || detections.length === 0) continue;
+            detectionsFound += detections.length;
 
-          if (!events || events.length === 0) continue;
+            const fw = frameWidth || 1280;
+            const fh = frameHeight || 720;
+            const now = Date.now();
 
-          // 3. Upload Snapshot and Post Detection
-          const snapshotUrl = await this.uploadSnapshot(frame, cam.id);
-          for (const ev of events) {
-            await this.postDetection(cam, {
-              type: ev.type,
-              severity: ev.severity,
-              confidence: ev.confidence,
-              boundingBoxes: ev.boundingBoxes,
-              snapshotUrl,
-              serviceSlug: ev.serviceSlug,
-              metadata: ev.metadata
-            });
+            // 2. Evaluate Violations
+            const events = this.pipeline.evaluateDetections(
+              { ...cam, activeModels },
+              detections,
+              now,
+              fw,
+              fh,
+              persons
+            );
+
+            if (!events || events.length === 0) continue;
+            eventsFound += events.length;
+
+            // 3. Upload Snapshot and Post Detection
+            const snapshotUrl = await this.uploadSnapshot(frame, cam.id);
+            for (const ev of events) {
+              await this.postDetection(cam, {
+                type: ev.type,
+                severity: ev.severity,
+                confidence: ev.confidence,
+                boundingBoxes: ev.boundingBoxes,
+                snapshotUrl,
+                serviceSlug: ev.serviceSlug,
+                metadata: ev.metadata
+              });
+            }
+          } catch (camErr) {
+            console.warn(`[SERVER-AI] Camera error (${cam.name || cam.id}):`, camErr.message);
           }
         }
 
         if (this.sweepCount === 1 || this.sweepCount % 10 === 0) {
-          console.log(`[SERVER-AI] 📡 Sweep #${this.sweepCount}: ${liveFrames} live cameras scanned, ${skippedNoFrame} offline/no-frame, ${detectionsFound} detections`);
+          console.log(`[SERVER-AI] 📡 Sweep #${this.sweepCount}: ${liveFrames} live cameras scanned, ${skippedNoFrame} offline/no-frame, ${detectionsFound} detections, ${eventsFound} events`);
         }
       } catch (err) {
         console.warn('[SERVER-AI] Loop error:', err.message);

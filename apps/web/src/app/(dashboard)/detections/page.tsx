@@ -360,6 +360,14 @@ function parseBoundingBoxes(rawBoxes: any, detectionType: string, confidence: nu
   return [];
 }
 
+function getTodayLocalDate(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 function DetectionsContent() {
   const searchParams = useSearchParams();
   const initialSearch = searchParams?.get('search') || '';
@@ -371,6 +379,7 @@ function DetectionsContent() {
   const [selectedService, setSelectedService] = useState('all');
   const [selectedCamera, setSelectedCamera] = useState('all');
   const [selectedBranch, setSelectedBranch] = useState('all');
+  const [selectedDate, setSelectedDate] = useState<string>(() => getTodayLocalDate());
   const [searchQuery, setSearchQuery] = useState(initialSearch);
   const [isLive, setIsLive] = useState(false);
   
@@ -460,10 +469,18 @@ function DetectionsContent() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  const loadData = async () => {
+  const loadData = async (dateValue?: unknown) => {
+    const activeDate = typeof dateValue === 'string' ? dateValue : selectedDate;
     try {
+      let detectionsEndpoint = '/detections/';
+      if (activeDate) {
+        const start = new Date(`${activeDate}T00:00:00`).toISOString();
+        const end = new Date(`${activeDate}T23:59:59.999`).toISOString();
+        detectionsEndpoint = `/detections/?from=${encodeURIComponent(start)}&to=${encodeURIComponent(end)}`;
+      }
+
       const [detData, camsData, branchesData, statsData, tStats] = await Promise.all([
-        api.get<DetectionItem[]>('/detections/'),
+        api.get<DetectionItem[]>(detectionsEndpoint),
         api.get<any[]>('/cameras/'),
         api.get<any[]>('/branches/'),
         api.get<any>('/detections/storage/stats').catch(() => null),
@@ -501,10 +518,11 @@ function DetectionsContent() {
   };
 
   useEffect(() => {
-    loadData();
-    const interval = setInterval(loadData, 4000);
+    setLoading(true);
+    loadData(selectedDate);
+    const interval = setInterval(() => loadData(selectedDate), 4000);
     return () => clearInterval(interval);
-  }, []);
+  }, [selectedDate]);
 
   // Single detection delete
   const handleDeleteSingle = async (e: React.MouseEvent, id: string) => {
@@ -848,9 +866,37 @@ function DetectionsContent() {
             />
           </div>
 
-          <div className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-xs text-slate-300">
-            <Calendar className="h-4 w-4 text-amber-500" />
-            <span>اليوم — {new Date().toLocaleDateString('ar-EG', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-300">
+            <Calendar className="h-4 w-4 text-amber-500 shrink-0" />
+            <input
+              type="date"
+              value={selectedDate}
+              max={getTodayLocalDate()}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="bg-transparent text-xs text-slate-200 focus:outline-none [color-scheme:dark]"
+              aria-label="تصفية حسب التاريخ"
+            />
+            {selectedDate !== getTodayLocalDate() && (
+              <button
+                type="button"
+                onClick={() => setSelectedDate(getTodayLocalDate())}
+                className="rounded-md bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-[11px] font-semibold text-amber-300 hover:bg-amber-500/25 transition-colors"
+              >
+                اليوم
+              </button>
+            )}
+            {selectedDate ? (
+              <button
+                type="button"
+                onClick={() => setSelectedDate('')}
+                className="rounded-md bg-slate-800 px-2 py-0.5 text-[11px] text-slate-400 hover:text-slate-200 transition-colors"
+                title="عرض جميع الأيام"
+              >
+                الكل
+              </button>
+            ) : (
+              <span className="text-[11px] text-amber-400 font-semibold">جميع الأيام</span>
+            )}
           </div>
         </div>
       </div>

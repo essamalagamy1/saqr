@@ -79,6 +79,9 @@ func (h *Handler) List(c *fiber.Ctx) error {
 	cameraID := c.Query("camera_id")
 	serviceType := c.Query("type")
 	severity := c.Query("severity")
+	fromTime := c.Query("from")
+	toTime := c.Query("to")
+	dateStr := c.Query("date")
 
 	query := `
 		SELECT d.id::text, d.company_id::text, COALESCE(d.branch_id::text, c.branch_id::text, b.id::text, '') as branch_id, COALESCE(b.name, cb.name, 'فرع القاهرة الجديدة') as branch_name,
@@ -122,8 +125,26 @@ func (h *Handler) List(c *fiber.Ctx) error {
 		args = append(args, severity)
 		idx++
 	}
+	if fromTime != "" {
+		query += fmt.Sprintf(" AND d.detected_at >= $%d::timestamptz", idx)
+		args = append(args, fromTime)
+		idx++
+	}
+	if toTime != "" {
+		query += fmt.Sprintf(" AND d.detected_at <= $%d::timestamptz", idx)
+		args = append(args, toTime)
+		idx++
+	} else if dateStr != "" && fromTime == "" {
+		query += fmt.Sprintf(" AND DATE(d.detected_at AT TIME ZONE 'Africa/Cairo') = $%d::date", idx)
+		args = append(args, dateStr)
+		idx++
+	}
 
-	query += ` ORDER BY d.detected_at DESC LIMIT 50`
+	limit := 50
+	if fromTime != "" || toTime != "" || dateStr != "" {
+		limit = 200
+	}
+	query += fmt.Sprintf(" ORDER BY d.detected_at DESC LIMIT %d", limit)
 
 	rows, err := h.db.Query(c.Context(), query, args...)
 	if err != nil {

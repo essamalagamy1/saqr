@@ -13,7 +13,7 @@ const MODEL_SPECS = {
     auxiliary: true,
     personClassId: 0,
     phoneClassId: 67,
-    defaultConf: 0.25,
+    defaultConf: 0.20,
     phoneConf: 0.13
   },
   face_mask: {
@@ -320,7 +320,7 @@ class AIEngine {
         const b = rawRgb[idx + 2];
         const lum = 0.299 * r + 0.587 * g + 0.114 * b;
         headTotal++;
-        if (lum < 75) {
+        if (lum < 110) {
           headDark++;
         }
       }
@@ -356,7 +356,7 @@ class AIEngine {
     const torsoDarkRatio = torsoTotal > 0 ? (torsoDark / torsoTotal) : 0;
     const torsoAvgLum = torsoTotal > 0 ? (torsoLumSum / torsoTotal) : 128;
 
-    const hasBlackMask = lowerDarkRatio >= 0.28 || lowerAvgLum < 70;
+    const hasBlackMask = lowerAvgLum < 70 || (lowerDarkRatio >= 0.35 && lowerAvgLum < 74);
     const hasBlackHeadCover = headDarkRatio >= 0.30;
     const hasBlackTshirt = torsoDarkRatio >= 0.38 || torsoAvgLum < 68;
 
@@ -411,25 +411,30 @@ class AIEngine {
   }
 
   /**
-   * Chromatic Glove vs Bare-Skin Analyzer.
-   * Prevents false bare-hand alerts on blue/cyan/black nitrile gloves or non-skin kitchen surfaces.
+   * Chromatic Glove vs Bare-Skin Analyzer using the eroded inner 60% hand core.
+   * Detects blue/teal, black, and white/translucent disposable gloves while isolating warm human skin.
    */
   _analyzeGloveColor(rawRgb, scale, padX, padY, box) {
     if (!rawRgb) return null;
     const [x1, y1, x2, y2] = box;
+    const origBw = x2 - x1;
+    const origBh = y2 - y1;
+    const insetX = origBw >= 14 ? origBw * 0.20 : 0;
+    const insetY = origBh >= 14 ? origBh * 0.20 : 0;
 
-    const gx1 = Math.max(0, Math.min(639, Math.round(x1 * scale + padX)));
-    const gy1 = Math.max(0, Math.min(639, Math.round(y1 * scale + padY)));
-    const gx2 = Math.max(0, Math.min(639, Math.round(x2 * scale + padX)));
-    const gy2 = Math.max(0, Math.min(639, Math.round(y2 * scale + padY)));
+    const gx1 = Math.max(0, Math.min(639, Math.round((x1 + insetX) * scale + padX)));
+    const gy1 = Math.max(0, Math.min(639, Math.round((y1 + insetY) * scale + padY)));
+    const gx2 = Math.max(0, Math.min(639, Math.round((x2 - insetX) * scale + padX)));
+    const gy2 = Math.max(0, Math.min(639, Math.round((y2 - insetY) * scale + padY)));
 
     const bw = gx2 - gx1;
     const bh = gy2 - gy1;
-    if (bw < 4 || bh < 4) return null;
+    if (bw < 3 || bh < 3) return null;
 
     let total = 0;
     let blueGlovePx = 0;
     let blackGlovePx = 0;
+    let whiteGlovePx = 0;
     let skinPx = 0;
 
     for (let y = gy1; y <= gy2; y++) {
@@ -439,14 +444,17 @@ class AIEngine {
         const g = rawRgb[idx + 1];
         const b = rawRgb[idx + 2];
         const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+        const chroma = Math.max(r, g, b) - Math.min(r, g, b);
         total++;
 
-        // Disposable blue/cyan/teal gloves
+        // Disposable blue/cyan/teal, black, or white/translucent latex-poly gloves
         if (b > 65 && (b - r) > 16 && b >= g - 12) {
           blueGlovePx++;
-        } else if (lum < 52 && Math.max(r, g, b) - Math.min(r, g, b) < 22) {
+        } else if (lum < 52 && chroma < 22) {
           blackGlovePx++;
-        } else if (r > 80 && g > 45 && b > 25 && r > g && (r - b) > 12) {
+        } else if ((lum >= 112 && chroma <= 20) || (lum >= 145 && chroma <= 28 && (r - b) <= 20)) {
+          whiteGlovePx++;
+        } else if (r > 82 && g > 45 && b > 25 && (r - b) >= 18 && (r - g) >= 7 && chroma >= 20) {
           skinPx++;
         }
       }
@@ -455,13 +463,17 @@ class AIEngine {
     if (total === 0) return null;
     const blueRatio = blueGlovePx / total;
     const blackRatio = blackGlovePx / total;
+    const whiteRatio = whiteGlovePx / total;
     const skinRatio = skinPx / total;
+    const hasWhiteGloves = whiteRatio >= 0.36 && whiteRatio > skinRatio * 1.4;
 
     return {
       blueRatio,
       blackRatio,
+      whiteRatio,
       skinRatio,
-      hasDisposableGloves: blueRatio >= 0.16 || blackRatio >= 0.48
+      hasWhiteGloves,
+      hasDisposableGloves: blueRatio >= 0.20 || blackRatio >= 0.48 || hasWhiteGloves
     };
   }
 
@@ -523,7 +535,8 @@ class AIEngine {
   /**
    * Verifies that a detection box belongs to an actual detected person in the frame.
    * mode: 'face' (upper/head ROI: top 42% of person box),
-   *       'hand' / 'phone' (body/hand ROI: excludes top 14% crown/hair/hat).
+   *       'hand' (mid-body/hand ROI: 14%..78% of person height),
+   *       'phone' (ear/chest/hand ROI: 14%..72% of person height, excludes crown & shoes).
    */
   _isInsidePersonRegion(box, persons, mode = 'any') {
     if (!persons || persons.length === 0) return false;
@@ -548,13 +561,13 @@ class AIEngine {
         );
       }
 
-      const marginX = pw * 0.10;
-      const marginY = ph * 0.08;
+      const marginX = pw * 0.12;
+      const maxRelY = mode === 'phone' ? 0.72 : 0.78;
       return (
         cx >= (px1 - marginX) &&
         cx <= (px2 + marginX) &&
         cy >= (py1 + ph * 0.14) &&
-        cy <= (py2 + marginY)
+        cy <= (py1 + ph * maxRelY)
       );
     });
   }
@@ -622,6 +635,154 @@ class AIEngine {
   }
 
   /**
+   * Decodes raw YOLO [1, 4+C, 8400] output into verified detection candidates,
+   * optionally mapping from a cropped ROI back to full-frame coordinates.
+   */
+  _decodeDomainCandidates({ modelKey, data, origW, origH, scale, padX, padY, rawRgb, confLimit, rawMode, offsetX = 0, offsetY = 0, fullW = null, fullH = null }) {
+    const spec = MODEL_SPECS[modelKey];
+    const numClasses = spec.numClasses;
+    const frameW = fullW || origW;
+    const frameH = fullH || origH;
+    const candidates = [];
+
+    for (let i = 0; i < 8400; i++) {
+      let maxScore = 0;
+      let bestCls = 0;
+
+      for (let c = 0; c < numClasses; c++) {
+        const score = data[(4 + c) * 8400 + i];
+        if (score > maxScore) {
+          maxScore = score;
+          bestCls = c;
+        }
+      }
+
+      if (maxScore < confLimit) continue;
+
+      const cx = data[0 * 8400 + i];
+      const cy = data[1 * 8400 + i];
+      const w = data[2 * 8400 + i];
+      const h = data[3 * 8400 + i];
+
+      // Un-letterbox into crop space, then translate back to full-frame space
+      const localCx = (cx - padX) / scale;
+      const localCy = (cy - padY) / scale;
+      const boxW = w / scale;
+      const boxH = h / scale;
+
+      const lx1 = Math.max(0, Math.min(origW, Math.round(localCx - boxW / 2)));
+      const ly1 = Math.max(0, Math.min(origH, Math.round(localCy - boxH / 2)));
+      const lx2 = Math.max(0, Math.min(origW, Math.round(localCx + boxW / 2)));
+      const ly2 = Math.max(0, Math.min(origH, Math.round(localCy + boxH / 2)));
+
+      const x1 = Math.max(0, Math.min(frameW, lx1 + offsetX));
+      const y1 = Math.max(0, Math.min(frameH, ly1 + offsetY));
+      const x2 = Math.max(0, Math.min(frameW, lx2 + offsetX));
+      const y2 = Math.max(0, Math.min(frameH, ly2 + offsetY));
+
+      const bw = x2 - x1;
+      const bh = y2 - y1;
+      if (bw <= 8 || bh <= 8) continue;
+
+      const areaRatio = (bw * bh) / (frameW * frameH);
+      const wRatio = bw / frameW;
+      const hRatio = bh / frameH;
+
+      if (!rawMode) {
+        if (modelKey === 'phone') {
+          if (areaRatio > 0.03 || wRatio > 0.14 || hRatio > 0.18 || bw > 90 || bh > 90) {
+            continue;
+          }
+        }
+        if (modelKey === 'face_mask') {
+          if (areaRatio > 0.20 || wRatio > 0.35 || hRatio > 0.40 || bw < 15 || bh < 15) {
+            continue;
+          }
+          const faceAspect = bw / bh;
+          if (faceAspect > 2.2 || faceAspect < 0.3) continue;
+        }
+        if (modelKey === 'gloves') {
+          if (areaRatio > 0.025 || wRatio > 0.14 || hRatio > 0.22 || bw > 85 || bh > 85) {
+            continue;
+          }
+        }
+      }
+
+      let rawClass = spec.classes[bestCls];
+      let classId = bestCls;
+      let meta = spec.statusMap[rawClass] || { status: rawClass, label: rawClass, isViolation: false, color: '#3b82f6' };
+      let score = parseFloat(maxScore.toFixed(3));
+
+      if (!rawMode) {
+        if (modelKey === 'face_mask') {
+          const skinCheck = this._checkSkinPresence(rawRgb, scale, padX, padY, [lx1, ly1, lx2, ly2]);
+          if ((rawClass === 'without_mask' || rawClass === 'mask_weared_incorrect') && !skinCheck.hasSkin) {
+            continue;
+          }
+
+          const uniform = this._analyzeBlackMaskAndHeadwear(rawRgb, scale, padX, padY, [lx1, ly1, lx2, ly2]);
+          const strongWithoutMask = rawClass === 'without_mask' && (score >= 0.72 || skinCheck.skinRatio >= 0.58);
+          if (uniform && !strongWithoutMask) {
+            if (uniform.hasBlackMask) {
+              rawClass = 'with_mask';
+              classId = 0;
+              let label = 'كمامة صحيحة';
+              if (uniform.hasBlackTshirt && uniform.hasBlackHeadCover) {
+                label = 'طاقم مطابق';
+              } else if (uniform.hasBlackTshirt) {
+                label = 'عامل بزي رسمي + كمامة';
+              } else if (uniform.hasBlackHeadCover) {
+                label = 'كمامة + غطاء رأس';
+              }
+              meta = { status: 'COMPLIANT', label, isViolation: false, color: '#10b981' };
+              score = Math.max(score, 0.94);
+            } else if (rawClass === 'without_mask') {
+              if (!skinCheck.hasSkin) continue;
+              meta = { ...spec.statusMap['without_mask'], label: 'بدون كمامة' };
+            }
+          }
+        }
+
+        if (modelKey === 'gloves') {
+          const gloveCheck = this._analyzeGloveColor(rawRgb, scale, padX, padY, [lx1, ly1, lx2, ly2]);
+          if (rawClass === 'bare_hand') {
+            const strongBlueOrBlack = gloveCheck && (gloveCheck.blueRatio >= 0.25 || gloveCheck.blackRatio >= 0.48);
+            const uncertainWhiteGlove = gloveCheck && gloveCheck.hasWhiteGloves && score < 0.62;
+            if (strongBlueOrBlack || uncertainWhiteGlove) {
+              rawClass = 'gloves';
+              classId = 0;
+              meta = {
+                ...spec.statusMap['gloves'],
+                label: uncertainWhiteGlove ? 'قفازات بيضاء' : 'قفازات'
+              };
+            } else if (score < 0.34 || (score < 0.65 && gloveCheck && gloveCheck.skinRatio < 0.14)) {
+              continue;
+            } else {
+              meta = { ...spec.statusMap['bare_hand'], label: 'يد بدون قفازات' };
+            }
+          } else if (rawClass === 'gloves' && gloveCheck && gloveCheck.hasWhiteGloves) {
+            meta = { ...spec.statusMap['gloves'], label: 'قفازات بيضاء' };
+          }
+        }
+      }
+
+      candidates.push({
+        model: modelKey,
+        classId,
+        rawClass,
+        label: meta.label,
+        status: meta.status,
+        isViolation: meta.isViolation,
+        color: meta.color,
+        score,
+        box: [x1, y1, x2, y2]
+      });
+    }
+
+    return candidates;
+  }
+
+  /**
    * Run inference on a frame with the active models assigned to this camera.
    * activeModels: string[] e.g. ['face_mask', 'gloves', 'phone']
    * options: { rawMode?: boolean, confThreshold?: number }
@@ -677,183 +838,122 @@ class AIEngine {
       }
     }
 
-    const tasks = [];
-
-    // Step 2: Run active custom domain models concurrently
+    // Step 2: Run active custom domain models sequentially on full frame
+    const candidatesByModel = {};
+    const confByModel = {};
     for (const modelKey of modelsToRun) {
-      tasks.push((async () => {
-        const session = this.sessions[modelKey];
-        const spec = MODEL_SPECS[modelKey];
-        let confLimit = options.confThreshold ?? spec.defaultConf ?? this.confThreshold;
-        if (!rawMode && modelKey === 'phone' && phoneCustomActive) {
-          confLimit = this.manifest?.models?.phone?.conf ?? 0.22;
-        }
+      const session = this.sessions[modelKey];
+      const spec = MODEL_SPECS[modelKey];
+      let confLimit = options.confThreshold ?? spec.defaultConf ?? this.confThreshold;
+      if (!rawMode && modelKey === 'gloves' && options.confThreshold === undefined) {
+        confLimit = 0.30; // Catch low-confidence translucent white gloves for chromatic verification
+      }
+      if (!rawMode && modelKey === 'phone' && phoneCustomActive) {
+        confLimit = this.manifest?.models?.phone?.conf ?? 0.35;
+      }
+      confByModel[modelKey] = confLimit;
 
-        try {
-          const out = await session.run({ images: tensor });
-          const data = out.output0 ? out.output0.data : out[Object.keys(out)[0]].data;
+      try {
+        const out = await session.run({ images: tensor });
+        const data = out.output0 ? out.output0.data : out[Object.keys(out)[0]].data;
 
-          const candidates = [];
-          const numClasses = spec.numClasses;
-
-          for (let i = 0; i < 8400; i++) {
-            let maxScore = 0;
-            let bestCls = 0;
-
-            for (let c = 0; c < numClasses; c++) {
-              const score = data[(4 + c) * 8400 + i];
-              if (score > maxScore) {
-                maxScore = score;
-                bestCls = c;
-              }
-            }
-
-            if (maxScore >= confLimit) {
-              const cx = data[0 * 8400 + i];
-              const cy = data[1 * 8400 + i];
-              const w = data[2 * 8400 + i];
-              const h = data[3 * 8400 + i];
-
-              // Un-letterbox back to original image space:
-              const origCx = (cx - padX) / scale;
-              const origCy = (cy - padY) / scale;
-              const origWBox = w / scale;
-              const origHBox = h / scale;
-
-              const x1 = Math.max(0, Math.min(origW, Math.round(origCx - origWBox / 2)));
-              const y1 = Math.max(0, Math.min(origH, Math.round(origCy - origHBox / 2)));
-              const x2 = Math.max(0, Math.min(origW, Math.round(origCx + origWBox / 2)));
-              const y2 = Math.max(0, Math.min(origH, Math.round(origCy + origHBox / 2)));
-
-              const bw = x2 - x1;
-              const bh = y2 - y1;
-
-              if (bw > 8 && bh > 8) {
-                const areaRatio = (bw * bh) / (origW * origH);
-                const wRatio = bw / origW;
-                const hRatio = bh / origH;
-
-                if (!rawMode) {
-                  // Physical CCTV Filter: A phone in a ceiling camera is a small handheld object
-                  if (modelKey === 'phone') {
-                    if (areaRatio > 0.03 || wRatio > 0.14 || hRatio > 0.18 || bw < 12 || bh < 12 || bw > 90 || bh > 90) {
-                      continue;
-                    }
-                  }
-
-                  // Face mask filter: face box cannot cover more than 20% of the entire camera screen
-                  if (modelKey === 'face_mask') {
-                    if (areaRatio > 0.20 || wRatio > 0.35 || hRatio > 0.40) {
-                      continue;
-                    }
-                    if (bw < 15 || bh < 15) continue;
-                    const faceAspect = bw / bh;
-                    if (faceAspect > 2.2 || faceAspect < 0.3) continue;
-                  }
-
-                  // Gloves & hand filter: hand in ceiling CCTV cannot be as large as a torso/person
-                  if (modelKey === 'gloves') {
-                    if (areaRatio > 0.025 || wRatio > 0.14 || hRatio > 0.22 || bw > 85 || bh > 85) {
-                      continue;
-                    }
-                  }
-                }
-
-                let rawClass = spec.classes[bestCls];
-                let classId = bestCls;
-                let meta = spec.statusMap[rawClass] || { status: rawClass, label: rawClass, isViolation: false, color: '#3b82f6' };
-                let score = parseFloat(maxScore.toFixed(3));
-
-                if (!rawMode) {
-                  // Specialized Black Mask, Black Headwear & Black T-Shirt (Uniform) Validation
-                  if (modelKey === 'face_mask') {
-                    const skinCheck = this._checkSkinPresence(rawRgb, scale, padX, padY, [x1, y1, x2, y2]);
-                    if ((rawClass === 'without_mask' || rawClass === 'mask_weared_incorrect') && !skinCheck.hasSkin) {
-                      continue;
-                    }
-
-                    const uniform = this._analyzeBlackMaskAndHeadwear(rawRgb, scale, padX, padY, [x1, y1, x2, y2]);
-                    const strongWithoutMask = rawClass === 'without_mask' && score >= 0.72;
-                    if (uniform && !strongWithoutMask) {
-                      if (uniform.hasBlackMask) {
-                        rawClass = 'with_mask';
-                        classId = 0;
-                        let label = 'كمامة صحيحة';
-                        if (uniform.hasBlackTshirt && uniform.hasBlackHeadCover) {
-                          label = 'طاقم مطابق';
-                        } else if (uniform.hasBlackTshirt) {
-                          label = 'عامل بزي رسمي + كمامة';
-                        } else if (uniform.hasBlackHeadCover) {
-                          label = 'كمامة + غطاء رأس';
-                        }
-                        meta = {
-                          status: 'COMPLIANT',
-                          label,
-                          isViolation: false,
-                          color: '#10b981'
-                        };
-                        score = Math.max(score, 0.94);
-                      } else if (rawClass === 'without_mask' || uniform.lowerDarkRatio < 0.22) {
-                        if (!skinCheck.hasSkin) continue;
-                        rawClass = 'without_mask';
-                        classId = 1;
-                        meta = {
-                          ...spec.statusMap['without_mask'],
-                          label: 'بدون كمامة'
-                        };
-                      }
-                    }
-                  }
-
-                  // Gloves & Bare Hand Validation
-                  if (modelKey === 'gloves') {
-                    if (rawClass === 'bare_hand') {
-                      const gloveCheck = this._analyzeGloveColor(rawRgb, scale, padX, padY, [x1, y1, x2, y2]);
-                      if (gloveCheck && gloveCheck.hasDisposableGloves) {
-                        rawClass = 'gloves';
-                        classId = 0;
-                        meta = {
-                          ...spec.statusMap['gloves'],
-                          label: 'قفازات'
-                        };
-                      } else if (gloveCheck && gloveCheck.skinRatio < 0.06 && score < 0.78) {
-                        continue;
-                      } else {
-                        meta = {
-                          ...spec.statusMap['bare_hand'],
-                          label: 'يد بدون قفازات'
-                        };
-                      }
-                    }
-                  }
-                }
-
-                candidates.push({
-                  model: modelKey,
-                  classId,
-                  rawClass,
-                  label: meta.label,
-                  status: meta.status,
-                  isViolation: meta.isViolation,
-                  color: meta.color,
-                  score,
-                  box: [x1, y1, x2, y2]
-                });
-              }
-            }
-          }
-
-          const nmsIou = (!rawMode && modelKey === 'gloves') ? 0.15 : this.nmsThreshold;
-          const minCenterDist = (!rawMode && modelKey === 'gloves') ? 70 : 0;
-          const filtered = this._applyNms(candidates, nmsIou, minCenterDist);
-          allDetections.push(...filtered);
-        } catch (err) {
-          console.warn(`[AI] Inference error on ${modelKey}:`, err.message);
-        }
-      })());
+        candidatesByModel[modelKey] = this._decodeDomainCandidates({
+          modelKey, data, origW, origH, scale, padX, padY, rawRgb, confLimit, rawMode
+        });
+      } catch (err) {
+        console.warn(`[AI] Inference error on ${modelKey}:`, err.message);
+        candidatesByModel[modelKey] = [];
+      }
     }
 
-    await Promise.all(tasks);
+    // Step 3: Shared Person-ROI zoomed rescue for face_mask, gloves, and phone on 640x360 CCTV frames
+    if (!rawMode && cocoPersons && cocoPersons.length > 0 && modelsToRun.length > 0) {
+      const sharp = require('sharp');
+      const targetPersons = [...cocoPersons]
+        .filter(p => (p.box[2] - p.box[0]) >= 28 && (p.box[3] - p.box[1]) >= 50)
+        .sort((a, b) => ((b.box[2] - b.box[0]) * (b.box[3] - b.box[1])) - ((a.box[2] - a.box[0]) * (a.box[3] - a.box[1])))
+        .slice(0, 3);
+
+      for (const p of targetPersons) {
+        const missingModels = modelsToRun.filter(modelKey => {
+          const mode = modelKey === 'face_mask' ? 'face' : (modelKey === 'gloves' ? 'hand' : 'phone');
+          return !(candidatesByModel[modelKey] || []).some(c => this._isInsidePersonRegion(c.box, [p], mode));
+        });
+        if (missingModels.length === 0) continue;
+
+        try {
+          const [px1, py1, px2, py2] = p.box;
+          const pw = px2 - px1;
+          const ph = py2 - py1;
+          const pcx = (px1 + px2) / 2;
+          const side = Math.max(160, Math.round(Math.max(pw * 1.6, ph * 0.85)));
+          const cx1 = Math.max(0, Math.min(origW - side, Math.round(pcx - side / 2)));
+          const cy1 = Math.max(0, Math.round(py1 - side * 0.12));
+          const cx2 = Math.min(origW, cx1 + side);
+          const cy2 = Math.min(origH, cy1 + side);
+          const cw = cx2 - cx1;
+          const ch = cy2 - cy1;
+          if (cw < 48 || ch < 48) continue;
+
+          const cScale = 640.0 / Math.max(cw, ch);
+          const cNewW = Math.round(cw * cScale);
+          const cNewH = Math.round(ch * cScale);
+          const cPadX = (640 - cNewW) / 2.0;
+          const cPadY = (640 - cNewH) / 2.0;
+          const cropRaw = await sharp(frameBuffer)
+            .extract({ left: cx1, top: cy1, width: cw, height: ch })
+            .resize(640, 640, { fit: 'contain', background: { r: 114, g: 114, b: 114 } })
+            .removeAlpha()
+            .raw()
+            .toBuffer();
+
+          const chSize = 640 * 640;
+          const cFloat32 = new Float32Array(3 * chSize);
+          for (let i = 0; i < chSize; i++) {
+            cFloat32[0 * chSize + i] = cropRaw[i * 3 + 0] / 255.0;
+            cFloat32[1 * chSize + i] = cropRaw[i * 3 + 1] / 255.0;
+            cFloat32[2 * chSize + i] = cropRaw[i * 3 + 2] / 255.0;
+          }
+          const cropTensor = new ort.Tensor('float32', cFloat32, [1, 3, 640, 640]);
+
+          for (const modelKey of missingModels) {
+            try {
+              const cropOut = await this.sessions[modelKey].run({ images: cropTensor });
+              const cropData = cropOut.output0 ? cropOut.output0.data : cropOut[Object.keys(cropOut)[0]].data;
+              const cropCands = this._decodeDomainCandidates({
+                modelKey,
+                data: cropData,
+                origW: cw,
+                origH: ch,
+                scale: cScale,
+                padX: cPadX,
+                padY: cPadY,
+                rawRgb: cropRaw,
+                confLimit: Math.min(confByModel[modelKey], 0.32),
+                rawMode: false,
+                offsetX: cx1,
+                offsetY: cy1,
+                fullW: origW,
+                fullH: origH
+              });
+              candidatesByModel[modelKey].push(...cropCands);
+            } catch (err) {
+              console.warn(`[AI] ROI inference error on ${modelKey}:`, err.message);
+            }
+          }
+        } catch (cropErr) {
+          console.warn('[AI] ROI crop error:', cropErr.message);
+        }
+      }
+    }
+
+    for (const modelKey of modelsToRun) {
+      const candidates = candidatesByModel[modelKey] || [];
+      const nmsIou = (!rawMode && modelKey === 'gloves') ? 0.15 : this.nmsThreshold;
+      const minCenterDist = (!rawMode && modelKey === 'gloves') ? 70 : 0;
+      const filtered = this._applyNms(candidates, nmsIou, minCenterDist);
+      allDetections.push(...filtered);
+    }
 
     // Person-anchored spatial gating in production mode
     const verifiedDetections = (rawMode || cocoPersons === null)
